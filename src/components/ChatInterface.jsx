@@ -131,7 +131,7 @@ const ChatInterface = ({ initialTasks = [] }) => {
 
   return (
     <Sidebar>
-      <div className="flex h-screen">
+      <div className="fixed inset-0 flex">
         <SidebarBody>
           <div className="flex flex-col h-full">
             {/* Main Navigation */}
@@ -173,12 +173,12 @@ const ChatInterface = ({ initialTasks = [] }) => {
           </div>
         </SidebarBody>
 
-        <div className="flex-1 flex flex-col bg-neutral-900">
-          <div className="flex-1 w-full flex flex-col px-4">
-            {activeSection === 'chat' && (
-              <div className="flex flex-col h-full">
-                {messages.length === 0 ? (
-                  <div className="flex-1 flex items-center justify-center">
+        <main className="flex-1 flex flex-col bg-neutral-900">
+          {activeSection === 'chat' && (
+            <div className="relative flex flex-col h-full">
+              {messages.length === 0 ? (
+                <>
+                  <div className="flex-1 flex items-center justify-center p-4">
                     <div className="text-center space-y-6 w-full max-w-2xl">
                       <h1 className="text-4xl font-semibold text-white">
                         What can I help with?
@@ -188,30 +188,43 @@ const ChatInterface = ({ initialTasks = [] }) => {
                       </p>
                     </div>
                   </div>
-                ) : (
-                  <div className="flex-1 overflow-y-auto py-4 custom-scrollbar">
+                  <div className="w-full bg-neutral-900 border-t border-neutral-800 p-4">
                     <div className="max-w-2xl mx-auto">
+                      <SearchBar onSearch={handleUserInput} loading={loading} />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-neutral-800 scrollbar-track-transparent">
+                    <div className="max-w-2xl mx-auto px-4 py-4">
                       {messages.map((message, index) => (
                         <Message key={index} {...message} />
                       ))}
                     </div>
                   </div>
-                )}
-                <div className="py-4 max-w-2xl mx-auto w-full">
-                  <SearchBar onSearch={handleUserInput} loading={loading} />
-                </div>
-              </div>
-            )}
-            {activeSection === 'timeline' && (
-              <div className="flex-1 flex items-center justify-center">
-                <Timeline />
-              </div>
-            )}
-            {activeSection === 'reminders' && (
+                  <div className="w-full bg-neutral-900 border-t border-neutral-800 p-4">
+                    <div className="max-w-2xl mx-auto">
+                      <SearchBar onSearch={handleUserInput} loading={loading} />
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          
+          {activeSection === 'timeline' && (
+            <div className="h-full overflow-auto p-4">
+              <Timeline />
+            </div>
+          )}
+          
+          {activeSection === 'reminders' && (
+            <div className="h-full overflow-auto">
               <Tasks tasks={reminders} />
-            )}
-          </div>
-        </div>
+            </div>
+          )}
+        </main>
       </div>
     </Sidebar>
   );

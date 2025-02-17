@@ -11,6 +11,7 @@ class GeminiService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
     this.model = this.genAI.getGenerativeModel({ model: "gemini-pro" });
+    this.conversationHistory = []; // Add conversation history array
 
     // Define available functions
     this.functions = {
@@ -58,7 +59,14 @@ class GeminiService {
   }
 
   async createTask(input) {
+    // Add user's input to conversation history
+    this.conversationHistory.push({ role: "user", content: input });
+
     const prompt = `You are a versatile AI assistant that can handle both reminder management and general conversations.
+You have access to the conversation history to maintain context.
+
+Previous conversation:
+${this.conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
 
 Your task is to analyze the user's input and call the appropriate function:
 
@@ -66,10 +74,12 @@ Your task is to analyze the user's input and call the appropriate function:
    - Call the createReminder function
    - Extract relevant details from the input to fill the parameters
    - Ensure the response is helpful and complete
+   - Consider the context from previous messages if relevant
 
 2. If the input is general conversation (e.g., questions, greetings, casual chat):
    - Call the chat function
    - Provide a friendly, contextual response
+   - Reference previous messages when appropriate to maintain conversation flow
 
 Available functions:
 
@@ -82,29 +92,6 @@ Remember:
   "function": "functionName",
   "parameters": {
     // function parameters here
-  }
-}
-
-Examples:
-
-User: "Remind me to walk the dog every morning at 7am"
-Response:
-{
-  "function": "createReminder",
-  "parameters": {
-    "title": "Walk the dog",
-    "description": "Daily morning dog walk",
-    "schedule": "Daily",
-    "time": "7am"
-  }
-}
-
-User: "How are you doing today?"
-Response:
-{
-  "function": "chat",
-  "parameters": {
-    "response": "I'm doing well, thank you for asking! I'm here to help you manage your reminders and chat with you. How can I assist you today?"
   }
 }
 
@@ -154,17 +141,32 @@ Current input: "${input}"`;
         }
 
         console.log("Task stored in DB:", data);
-        return {
+        const taskResponse = {
           type: 'task',
-          data: data[0] // Return the actual saved task from the database
+          data: {
+            ...parsedResponse.parameters,
+            completed: false
+          }
         };
+        // Add AI's response to conversation history
+        this.conversationHistory.push({ 
+          role: "assistant", 
+          content: `Created reminder: ${parsedResponse.parameters.title}`
+        });
+        return taskResponse;
       } else if (parsedResponse.function === 'chat') {
-        return {
+        const chatResponse = {
           type: 'conversation',
           data: {
             response: parsedResponse.parameters.response
           }
         };
+        // Add AI's response to conversation history
+        this.conversationHistory.push({ 
+          role: "assistant", 
+          content: parsedResponse.parameters.response 
+        });
+        return chatResponse;
       }
 
       throw new Error('Unknown function call');
