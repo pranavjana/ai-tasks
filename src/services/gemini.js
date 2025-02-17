@@ -1,10 +1,18 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { createClient } from "@supabase/supabase-js"; // NEW: Import Supabase client
+import sql from "./db";
+
+// NEW: Initialize Supabase client using environment variables
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL, // NEW
+  import.meta.env.VITE_SUPABASE_ANON_KEY  // NEW
+);
 
 class GeminiService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
     this.model = this.genAI.getGenerativeModel({ model: "gemini-pro" });
-    
+
     // Define available functions
     this.functions = {
       createReminder: {
@@ -107,28 +115,42 @@ Current input: "${input}"`;
       const result = await this.model.generateContent(prompt);
       const response = await result.response;
       const text = response.text().trim();
-      
+
       console.log('API Response:', text); // Debug log
 
       // Remove any potential markdown formatting
       const jsonText = text.replace(/```json\n?|\n?```/g, '').trim();
       console.log('Cleaned JSON text:', jsonText); // Debug log
-      
+
       const parsedResponse = JSON.parse(jsonText);
 
-      // Validate response structure
       if (!parsedResponse.function || !parsedResponse.parameters) {
         throw new Error('Invalid function call format');
       }
 
-      // Map function calls to our response format
       if (parsedResponse.function === 'createReminder') {
+        // Build the task object
+        const task = {
+          title: parsedResponse.parameters.title,
+          description: parsedResponse.parameters.description,
+          schedule: parsedResponse.parameters.schedule,
+          time: parsedResponse.parameters.time,
+          completed: false
+        };
+
+        // NEW: Insert the task into the database
+        const { data, error } = await supabase
+          .from("tasks")
+          .insert([task]);
+        if (error) {
+          console.error("Error storing task in DB:", error);
+        } else {
+          console.log("Task stored in DB:", data);
+        }
+
         return {
           type: 'task',
-          data: {
-            ...parsedResponse.parameters,
-            completed: false
-          }
+          data: task
         };
       } else if (parsedResponse.function === 'chat') {
         return {
@@ -145,15 +167,9 @@ Current input: "${input}"`;
       throw error;
     }
   }
-
-  // You can add more methods here for other capabilities
-  // For example:
-  // async updateReminder(id, updates) { ... }
-  // async deleteReminder(id) { ... }
-  // async markReminderComplete(id) { ... }
 }
 
 // Create a singleton instance
 const geminiService = new GeminiService();
 
-export default geminiService; 
+export default geminiService;
