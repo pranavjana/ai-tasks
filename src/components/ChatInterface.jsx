@@ -3,10 +3,11 @@ import Timeline from './Timeline';
 import Tasks from './Tasks';
 import TaskCard from './TaskCard';
 import { Sidebar, SidebarBody, SidebarLink } from './ui/Sidebar';
-import { MessageSquare, Bell, Calendar, ArrowRight } from 'lucide-react';
+import { MessageSquare, Bell, Calendar, ArrowRight, LayoutDashboard, User, Settings, LogOut } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import geminiService from '../services/gemini';
 import Button from './Button';
+import { useAuth } from '../contexts/AuthContext';
 
 const Message = ({ content, type = 'user', task }) => (
   <div className={`flex ${type === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -39,6 +40,7 @@ const ChatInterface = () => {
   const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState([]);
+  const { user, signOut } = useAuth();
 
   const handleUserInput = async (input) => {
     setLoading(true);
@@ -102,12 +104,34 @@ const ChatInterface = () => {
     },
   ];
 
+  const bottomLinks = [
+    {
+      href: "#",
+      label: "Profile",
+      icon: <User className="w-4 h-4" />,
+      onClick: () => setActiveSection('profile')
+    },
+    {
+      href: "#",
+      label: "Settings",
+      icon: <Settings className="w-4 h-4" />,
+      onClick: () => setActiveSection('settings')
+    },
+    {
+      href: "#",
+      label: "Logout",
+      icon: <LogOut className="w-4 h-4" />,
+      onClick: signOut
+    }
+  ];
+
   return (
     <Sidebar>
       <div className="flex h-screen">
         <SidebarBody>
           <div className="flex flex-col h-full">
-            <div className="flex-1 space-y-1">
+            {/* Main Navigation */}
+            <div className="flex-1 space-y-1 pt-4">
               {sidebarLinks.map((link) => (
                 <SidebarLink 
                   key={link.label} 
@@ -117,6 +141,30 @@ const ChatInterface = () => {
                   }}
                 />
               ))}
+            </div>
+
+            {/* Bottom Navigation */}
+            <div className="border-t border-neutral-800 pt-4 mt-4 space-y-1">
+              {bottomLinks.map((link) => (
+                <SidebarLink 
+                  key={link.label} 
+                  link={link}
+                />
+              ))}
+            </div>
+
+            {/* User Profile */}
+            <div className="border-t border-neutral-800 pt-4 mt-4">
+              <div className="flex items-center gap-3 px-2 py-2">
+                <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center">
+                  {user?.email?.[0].toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-white truncate">
+                    {user?.email}
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </SidebarBody>
