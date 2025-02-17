@@ -1,55 +1,61 @@
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ChatInterface from './components/ChatInterface';
 import LoginPage from './components/LoginPage';
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from './lib/supabase';
 import { useEffect, useState } from "react";
 import TaskCard from './components/TaskCard';
 
-// NEW: Correct Supabase URL initialization (if not already in environment variables)
-const supabase = createClient(
-  "https://ihiuqrjobgyjujyboqnv.supabase.co", 
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImloaXVxcmpvYmd5anVqeWJvcW52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk3OTA5MzQsImV4cCI6MjA1NTM2NjkzNH0.TQ22tyu6TW_Mi0sQSbkvx-UwwD87Fu-zhYQQfEZ2POs"
-);
-
-function TasksList() { 
-  const [tasks, setTasks] = useState([]); 
-
-  useEffect(() => { 
-    getTasks(); 
-  }, []); 
-
-  async function getTasks() { 
-    const { data, error } = await supabase.from("tasks").select(); 
-    if (error) { 
-      console.error("Error fetching tasks:", error); 
-    } else { 
-      setTasks(data); 
-    } 
-  } 
-
-  return ( 
-    <ul>
-      {tasks.map((task) => ( 
-        <li key={task.id}>{task.title}</li> 
-      ))} 
-    </ul> 
-  ); 
-}
-
-const ProtectedApp = () => {
+function ProtectedApp() {
   const { user } = useAuth();
+  const [tasks, setTasks] = useState([]);
+
+  useEffect(() => {
+    if (user) {
+      // Fetch initial tasks
+      fetchTasks();
+
+      // Subscribe to changes
+      const channel = supabase
+        .channel('tasks_changes')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'tasks' }, 
+          (payload) => {
+            console.log('Change received!', payload);
+            fetchTasks();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [user]);
+
+  const fetchTasks = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      setTasks(data || []);
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+    }
+  };
 
   if (!user) {
     return <LoginPage />;
   }
 
-  return (
-    <>
-      <ChatInterface />
-      <TasksList />
-    </>
-  );
-};
+  return <ChatInterface initialTasks={tasks} />;
+}
 
 function App() {
   return (

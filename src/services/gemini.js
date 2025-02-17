@@ -1,11 +1,10 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { createClient } from "@supabase/supabase-js"; // NEW: Import Supabase client
-import sql from "./db";
+import { createClient } from "@supabase/supabase-js";
 
-// NEW: Initialize Supabase client using environment variables
+// Initialize Supabase client using environment variables
 const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL, // NEW
-  import.meta.env.VITE_SUPABASE_ANON_KEY  // NEW
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
 class GeminiService {
@@ -129,28 +128,35 @@ Current input: "${input}"`;
       }
 
       if (parsedResponse.function === 'createReminder') {
+        // Get the current user
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (userError) throw userError;
+
         // Build the task object
         const task = {
           title: parsedResponse.parameters.title,
-          description: parsedResponse.parameters.description,
-          schedule: parsedResponse.parameters.schedule,
-          time: parsedResponse.parameters.time,
-          completed: false
+          description: parsedResponse.parameters.description || '',
+          schedule: parsedResponse.parameters.schedule || '',
+          time: parsedResponse.parameters.time || '',
+          completed: false,
+          user_id: user.id // Add the user_id
         };
 
-        // NEW: Insert the task into the database
+        // Insert the task into the database
         const { data, error } = await supabase
-          .from("tasks")
-          .insert([task]);
+          .from('tasks')
+          .insert([task])
+          .select();
+
         if (error) {
           console.error("Error storing task in DB:", error);
-        } else {
-          console.log("Task stored in DB:", data);
+          throw error;
         }
 
+        console.log("Task stored in DB:", data);
         return {
           type: 'task',
-          data: task
+          data: data[0] // Return the actual saved task from the database
         };
       } else if (parsedResponse.function === 'chat') {
         return {
@@ -163,7 +169,7 @@ Current input: "${input}"`;
 
       throw new Error('Unknown function call');
     } catch (error) {
-      console.error('Gemini API Error:', error);
+      console.error('Error:', error);
       throw error;
     }
   }
