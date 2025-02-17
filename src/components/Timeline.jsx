@@ -154,7 +154,7 @@ const Timeline = ({ events = [] }) => {
       <WeekHeader date={date} />
 
       {/* View Content */}
-      <div className="h-[728px] overflow-y-auto">
+      <div className="h-[728px] overflow-y-auto custom-scrollbar">
         <DayView events={events} date={date} />
       </div>
     </div>

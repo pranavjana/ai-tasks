@@ -1,11 +1,29 @@
 import SearchBar from './SearchBar';
 import Timeline from './Timeline';
+import Tasks from './Tasks';
 import { Sidebar, SidebarBody, SidebarLink } from './ui/Sidebar';
 import { MessageSquare, ListTodo, Calendar } from 'lucide-react';
 import { useState } from 'react';
+import geminiService from '../services/gemini';
 
 const ChatInterface = () => {
   const [activeSection, setActiveSection] = useState('chat');
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const handleTaskCreation = async (input) => {
+    setLoading(true);
+    try {
+      const taskJson = await geminiService.createTask(input);
+      setTasks(prevTasks => [...prevTasks, taskJson]);
+      setActiveSection('tasks');
+    } catch (error) {
+      console.error('Error creating task:', error);
+      // You might want to show this error to the user in a more friendly way
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const sidebarLinks = [
     { 
@@ -54,18 +72,14 @@ const ChatInterface = () => {
                 <h1 className="text-4xl font-semibold text-white">
                   What can I help with?
                 </h1>
-                <SearchBar />
+                <SearchBar onSearch={handleTaskCreation} loading={loading} />
               </div>
             )}
             {activeSection === 'timeline' && (
               <Timeline />
             )}
             {activeSection === 'tasks' && (
-              <div className="text-center space-y-6 w-full max-w-2xl">
-                <h1 className="text-2xl font-semibold text-white">
-                  Tasks Coming Soon
-                </h1>
-              </div>
+              <Tasks tasks={tasks} />
             )}
           </div>
         </div>
