@@ -35,12 +35,16 @@ const Message = ({ content, type = 'user', task }) => (
   </div>
 );
 
-const ChatInterface = () => {
+const ChatInterface = ({ initialTasks = [] }) => {
   const [activeSection, setActiveSection] = useState('chat');
-  const [reminders, setReminders] = useState([]);
+  const [reminders, setReminders] = useState(initialTasks);
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState([]);
   const { user, signOut } = useAuth();
+
+  useEffect(() => {
+    setReminders(initialTasks);
+  }, [initialTasks]);
 
   const handleUserInput = async (input) => {
     setLoading(true);
@@ -52,7 +56,7 @@ const ChatInterface = () => {
       
       if (response.type === 'task') {
         // Handle reminder creation
-        setReminders(prev => [...prev, response.data]);
+        setReminders(prev => [response.data, ...prev]);
         setMessages(prev => [...prev, {
           content: `I've set up a reminder based on your request. Here's what I've scheduled:`,
           type: 'ai',
