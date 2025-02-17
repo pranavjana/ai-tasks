@@ -3,8 +3,8 @@ import Timeline from './Timeline';
 import Tasks from './Tasks';
 import TaskCard from './TaskCard';
 import { Sidebar, SidebarBody, SidebarLink } from './ui/Sidebar';
-import { MessageSquare, ListTodo, Calendar, ArrowRight } from 'lucide-react';
-import { useState } from 'react';
+import { MessageSquare, Bell, Calendar, ArrowRight } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import geminiService from '../services/gemini';
 import Button from './Button';
 
@@ -23,9 +23,9 @@ const Message = ({ content, type = 'user', task }) => (
             <Button 
               size="sm" 
               className="w-full"
-              onClick={() => window.dispatchEvent(new CustomEvent('viewTasks'))}
+              onClick={() => window.dispatchEvent(new CustomEvent('viewReminders'))}
             >
-              View in Tasks <ArrowRight className="w-4 h-4 ml-2" />
+              View in Reminders <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           </div>
         </div>
@@ -36,29 +36,37 @@ const Message = ({ content, type = 'user', task }) => (
 
 const ChatInterface = () => {
   const [activeSection, setActiveSection] = useState('chat');
-  const [tasks, setTasks] = useState([]);
+  const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState([]);
 
-  const handleTaskCreation = async (input) => {
+  const handleUserInput = async (input) => {
     setLoading(true);
     // Add user message
     setMessages(prev => [...prev, { content: input, type: 'user' }]);
     
     try {
-      const taskJson = await geminiService.createTask(input);
-      setTasks(prevTasks => [...prevTasks, taskJson]);
+      const response = await geminiService.createTask(input);
       
-      // Add AI response with task card
-      setMessages(prev => [...prev, {
-        content: `I've created a task based on your request. Here's what I've set up:`,
-        type: 'ai',
-        task: taskJson
-      }]);
+      if (response.type === 'task') {
+        // Handle reminder creation
+        setReminders(prev => [...prev, response.data]);
+        setMessages(prev => [...prev, {
+          content: `I've set up a reminder based on your request. Here's what I've scheduled:`,
+          type: 'ai',
+          task: response.data
+        }]);
+      } else if (response.type === 'conversation') {
+        // Handle general conversation
+        setMessages(prev => [...prev, {
+          content: response.data.response,
+          type: 'ai'
+        }]);
+      }
     } catch (error) {
-      console.error('Error creating task:', error);
+      console.error('Error processing input:', error);
       setMessages(prev => [...prev, {
-        content: "I'm sorry, I couldn't create the task. Please try again.",
+        content: "I'm sorry, I couldn't process your request. Please try again.",
         type: 'ai'
       }]);
     } finally {
@@ -66,11 +74,11 @@ const ChatInterface = () => {
     }
   };
 
-  // Listen for viewTasks event
-  useState(() => {
-    const handleViewTasks = () => setActiveSection('tasks');
-    window.addEventListener('viewTasks', handleViewTasks);
-    return () => window.removeEventListener('viewTasks', handleViewTasks);
+  // Listen for viewReminders event
+  useEffect(() => {
+    const handleViewReminders = () => setActiveSection('reminders');
+    window.addEventListener('viewReminders', handleViewReminders);
+    return () => window.removeEventListener('viewReminders', handleViewReminders);
   }, []);
 
   const sidebarLinks = [
@@ -82,9 +90,9 @@ const ChatInterface = () => {
     },
     { 
       href: "#", 
-      label: "Tasks", 
-      icon: <ListTodo className="w-4 h-4" />,
-      onClick: () => setActiveSection('tasks')
+      label: "Reminders", 
+      icon: <Bell className="w-4 h-4" />,
+      onClick: () => setActiveSection('reminders')
     },
     { 
       href: "#", 
@@ -123,6 +131,9 @@ const ChatInterface = () => {
                       <h1 className="text-4xl font-semibold text-white">
                         What can I help with?
                       </h1>
+                      <p className="text-neutral-400">
+                        Ask me to set reminders or just chat with me!
+                      </p>
                     </div>
                   </div>
                 ) : (
@@ -135,7 +146,7 @@ const ChatInterface = () => {
                   </div>
                 )}
                 <div className="py-4 max-w-2xl mx-auto w-full">
-                  <SearchBar onSearch={handleTaskCreation} loading={loading} />
+                  <SearchBar onSearch={handleUserInput} loading={loading} />
                 </div>
               </div>
             )}
@@ -144,8 +155,8 @@ const ChatInterface = () => {
                 <Timeline />
               </div>
             )}
-            {activeSection === 'tasks' && (
-              <Tasks tasks={tasks} />
+            {activeSection === 'reminders' && (
+              <Tasks tasks={reminders} />
             )}
           </div>
         </div>

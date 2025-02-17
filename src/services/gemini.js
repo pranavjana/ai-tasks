@@ -4,61 +4,104 @@ class GeminiService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
     this.model = this.genAI.getGenerativeModel({ model: "gemini-pro" });
+    
+    // Define available functions
+    this.functions = {
+      createReminder: {
+        name: "createReminder",
+        description: "Creates a new reminder with the specified details",
+        parameters: {
+          type: "object",
+          properties: {
+            title: {
+              type: "string",
+              description: "Brief title of the reminder"
+            },
+            description: {
+              type: "string",
+              description: "Detailed description of what needs to be done"
+            },
+            schedule: {
+              type: "string",
+              description: "When the reminder should occur (e.g., 'Daily', 'Every Monday')"
+            },
+            time: {
+              type: "string",
+              description: "Time of day for the reminder"
+            }
+          },
+          required: ["title"]
+        }
+      },
+      chat: {
+        name: "chat",
+        description: "Responds to general conversation with a friendly message",
+        parameters: {
+          type: "object",
+          properties: {
+            response: {
+              type: "string",
+              description: "A friendly conversational response"
+            }
+          },
+          required: ["response"]
+        }
+      }
+    };
   }
 
   async createTask(input) {
-    const prompt = `You are an assistant that handles two types of requests: task creation and general conversation.
-    
-    Step 1: Classify the user’s input.
-    - If the input contains phrases like "Task request:" or "create a task", or any other format that asks you to create an event or such, treat it as a task creation request.
-    - Otherwise, treat it as a general conversation request.
+    const prompt = `You are a versatile AI assistant that can handle both reminder management and general conversations.
 
-    Step 2:
-    If classified as Task creation request:
-      Requirements:
-      1. The output must be valid JSON (no extra text, code blocks, or markdown).
-      2. The JSON must have exactly these fields:
-        {
-          "title": "Brief task title",
-          "description": "Detailed task description",
-          "schedule": "When the task should occur (e.g., 'Daily', 'Every Monday', etc.)",
-          "time": "Time of day if specified",
-          "completed": false
-        }
-      3. The "completed" field must always be false.
-      4. If any field is missing from the user input, fill it with an empty string.
-      5. If the user does not provide a separate title, you may use a short summary of their request.
-      6. Output nothing except the JSON object.
-      
-      Example Input:
-      "Pick up groceries every Monday at 5 pm"
+Your task is to analyze the user's input and call the appropriate function:
 
-      Example Output:
-      {
-        "title": "Pick up groceries",
-        "description": "Pick up groceries every Monday at 5 pm",
-        "schedule": "Every Monday",
-        "time": "5 pm",
-        "completed": false
-      }
+1. If the input is about creating a reminder or scheduling something (e.g., "remind me to...", "set a reminder...", "I need to remember..."):
+   - Call the createReminder function
+   - Extract relevant details from the input to fill the parameters
+   - Ensure the response is helpful and complete
 
-      Example Input:
-      "Walk the dog"
+2. If the input is general conversation (e.g., questions, greetings, casual chat):
+   - Call the chat function
+   - Provide a friendly, contextual response
 
-      Example Output:
-      {
-        "title": "Walk the dog",
-        "description": "Walk the dog",
-        "schedule": "",
-        "time": "",
-        "completed": false
-      }
-    
-    If classified as general conversation:
-    Converse as though you are a normal person talking to the user. Gather and provide any info asked.
+Available functions:
 
-    Task Request: "${input}"
-`;
+${JSON.stringify(this.functions, null, 2)}
+
+Remember:
+- Only call ONE function per response
+- Format your response as a function call in this exact format:
+{
+  "function": "functionName",
+  "parameters": {
+    // function parameters here
+  }
+}
+
+Examples:
+
+User: "Remind me to walk the dog every morning at 7am"
+Response:
+{
+  "function": "createReminder",
+  "parameters": {
+    "title": "Walk the dog",
+    "description": "Daily morning dog walk",
+    "schedule": "Daily",
+    "time": "7am"
+  }
+}
+
+User: "How are you doing today?"
+Response:
+{
+  "function": "chat",
+  "parameters": {
+    "response": "I'm doing well, thank you for asking! I'm here to help you manage your reminders and chat with you. How can I assist you today?"
+  }
+}
+
+Current input: "${input}"`;
 
     try {
       const result = await this.model.generateContent(prompt);
@@ -71,18 +114,43 @@ class GeminiService {
       const jsonText = text.replace(/```json\n?|\n?```/g, '').trim();
       console.log('Cleaned JSON text:', jsonText); // Debug log
       
-      const taskJson = JSON.parse(jsonText);
+      const parsedResponse = JSON.parse(jsonText);
 
-      // if (!taskJson.title || !taskJson.description) {
-      //   throw new Error('Invalid task format');
-      // }
+      // Validate response structure
+      if (!parsedResponse.function || !parsedResponse.parameters) {
+        throw new Error('Invalid function call format');
+      }
 
-      return taskJson;
+      // Map function calls to our response format
+      if (parsedResponse.function === 'createReminder') {
+        return {
+          type: 'task',
+          data: {
+            ...parsedResponse.parameters,
+            completed: false
+          }
+        };
+      } else if (parsedResponse.function === 'chat') {
+        return {
+          type: 'conversation',
+          data: {
+            response: parsedResponse.parameters.response
+          }
+        };
+      }
+
+      throw new Error('Unknown function call');
     } catch (error) {
       console.error('Gemini API Error:', error);
       throw error;
     }
   }
+
+  // You can add more methods here for other capabilities
+  // For example:
+  // async updateReminder(id, updates) { ... }
+  // async deleteReminder(id) { ... }
+  // async markReminderComplete(id) { ... }
 }
 
 // Create a singleton instance
