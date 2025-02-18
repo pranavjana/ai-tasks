@@ -36,9 +36,41 @@ class GeminiService {
             time: {
               type: "string",
               description: "Time of day for the reminder"
+            },
+            category: {
+              type: "string",
+              description: "Category of the task (e.g., 'Work', 'Personal', 'Health', 'Shopping', 'Home', 'Study', 'Social', 'Other')",
+              enum: ["Work", "Personal", "Health", "Shopping", "Home", "Study", "Social", "Other"]
             }
           },
-          required: ["title"]
+          required: ["title", "category"]
+        }
+      },
+      queryTasks: {
+        name: "queryTasks",
+        description: "Queries existing tasks and responds with relevant information",
+        parameters: {
+          type: "object",
+          properties: {
+            response: {
+              type: "string",
+              description: "Natural language response about the tasks"
+            },
+            filter: {
+              type: "object",
+              properties: {
+                category: {
+                  type: "string",
+                  description: "Filter by category"
+                },
+                completed: {
+                  type: "boolean",
+                  description: "Filter by completion status"
+                }
+              }
+            }
+          },
+          required: ["response"]
         }
       },
       chat: {
@@ -59,7 +91,20 @@ class GeminiService {
   }
 
   async createTask(input) {
-    // Add user's input to conversation history
+    // First, check if this is a query about existing tasks
+    const queryIndicators = [
+      "what", "which", "show", "tell", "list", "do i have", 
+      "are there", "how many", "any", "find", "search"
+    ];
+    
+    const isTaskQuery = queryIndicators.some(indicator => 
+      input.toLowerCase().includes(indicator)
+    );
+
+    if (isTaskQuery) {
+      return this.handleTaskQuery(input);
+    }
+
     this.conversationHistory.push({ role: "user", content: input });
 
     const prompt = `You are a versatile AI assistant that can handle both reminder management and general conversations.
@@ -68,30 +113,38 @@ You have access to the conversation history to maintain context.
 Previous conversation:
 ${this.conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
 
-Your task is to analyze the user's input and call the appropriate function:
+Your task is to analyze the user's input and call the appropriate function.
+When creating a reminder, you must intelligently deduce the most appropriate category for the task.
 
-1. If the input is about creating a reminder or scheduling something (e.g., "remind me to...", "set a reminder...", "I need to remember..."):
-   - Call the createReminder function
-   - Extract relevant details from the input to fill the parameters
-   - Ensure the response is helpful and complete
-   - Consider the context from previous messages if relevant
-
-2. If the input is general conversation (e.g., questions, greetings, casual chat):
-   - Call the chat function
-   - Provide a friendly, contextual response
-   - Reference previous messages when appropriate to maintain conversation flow
+Categories and their typical use cases:
+- Work: Professional tasks, meetings, deadlines, work-related calls
+- Personal: Self-care, errands, personal appointments
+- Health: Exercise, medication, doctor appointments, wellness activities
+- Shopping: Groceries, online orders, shopping lists
+- Home: Cleaning, maintenance, repairs, household chores
+- Study: Homework, research, learning activities, courses
+- Social: Meetups, calls with friends, social events, birthdays
+- Other: Anything that doesn't fit the above categories
 
 Available functions:
-
 ${JSON.stringify(this.functions, null, 2)}
 
 Remember:
 - Only call ONE function per response
-- Format your response as a function call in this exact format:
+- Always include a category when creating a reminder
+- Choose the most appropriate category based on the task context
+- Format your response as a valid JSON object with 'function' and 'parameters' fields
+- Do not include any additional text or markdown formatting
+
+Example response format:
 {
-  "function": "functionName",
+  "function": "createReminder",
   "parameters": {
-    // function parameters here
+    "title": "Example task",
+    "category": "Work",
+    "description": "Optional description",
+    "schedule": "Optional schedule",
+    "time": "Optional time"
   }
 }
 
@@ -102,77 +155,219 @@ Current input: "${input}"`;
       const response = await result.response;
       const text = response.text().trim();
 
-      console.log('API Response:', text); // Debug log
+      console.log('Raw API Response:', text);
 
-      // Remove any potential markdown formatting
-      const jsonText = text.replace(/```json\n?|\n?```/g, '').trim();
-      console.log('Cleaned JSON text:', jsonText); // Debug log
+      // Try to extract JSON from the response if it's wrapped in markdown or has extra text
+      let jsonText = text;
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonText = jsonMatch[0];
+      }
 
-      const parsedResponse = JSON.parse(jsonText);
+      console.log('Extracted JSON:', jsonText);
+
+      let parsedResponse;
+      try {
+        parsedResponse = JSON.parse(jsonText);
+      } catch (parseError) {
+        console.error('JSON Parse Error:', parseError);
+        throw new Error('Invalid response format from AI');
+      }
 
       if (!parsedResponse.function || !parsedResponse.parameters) {
-        throw new Error('Invalid function call format');
+        console.error('Missing required fields:', parsedResponse);
+        throw new Error('Invalid response structure: missing required fields');
       }
 
       if (parsedResponse.function === 'createReminder') {
-        // Get the current user
+        if (!parsedResponse.parameters.title || !parsedResponse.parameters.category) {
+          console.error('Missing required parameters:', parsedResponse.parameters);
+          throw new Error('Invalid reminder: missing required parameters');
+        }
+
         const { data: { user }, error: userError } = await supabase.auth.getUser();
         if (userError) throw userError;
 
-        // Build the task object
         const task = {
           title: parsedResponse.parameters.title,
           description: parsedResponse.parameters.description || '',
           schedule: parsedResponse.parameters.schedule || '',
           time: parsedResponse.parameters.time || '',
+          category: parsedResponse.parameters.category,
           completed: false,
-          user_id: user.id // Add the user_id
+          user_id: user.id
         };
 
-        // Insert the task into the database
         const { data, error } = await supabase
           .from('tasks')
           .insert([task])
           .select();
 
         if (error) {
-          console.error("Error storing task in DB:", error);
+          console.error("Supabase Error:", error);
           throw error;
         }
 
-        console.log("Task stored in DB:", data);
         const taskResponse = {
           type: 'task',
           data: {
-            ...parsedResponse.parameters,
-            completed: false
+            ...task,
+            id: data[0].id
           }
         };
-        // Add AI's response to conversation history
+
         this.conversationHistory.push({ 
           role: "assistant", 
-          content: `Created reminder: ${parsedResponse.parameters.title}`
+          content: `Created reminder: ${task.title} (Category: ${task.category})`
         });
+        
         return taskResponse;
       } else if (parsedResponse.function === 'chat') {
+        if (!parsedResponse.parameters.response) {
+          throw new Error('Invalid chat response: missing response parameter');
+        }
+
         const chatResponse = {
           type: 'conversation',
           data: {
             response: parsedResponse.parameters.response
           }
         };
-        // Add AI's response to conversation history
+
         this.conversationHistory.push({ 
           role: "assistant", 
           content: parsedResponse.parameters.response 
         });
+
         return chatResponse;
       }
 
-      throw new Error('Unknown function call');
+      throw new Error('Unknown function type: ' + parsedResponse.function);
     } catch (error) {
-      console.error('Error:', error);
+      console.error('Detailed Error:', error);
+      // Add error to conversation history to help debug
+      this.conversationHistory.push({ 
+        role: "error", 
+        content: error.message 
+      });
       throw error;
+    }
+  }
+
+  async handleTaskQuery(input) {
+    this.conversationHistory.push({ role: "user", content: input });
+
+    const prompt = `You are a helpful AI assistant that can query and provide information about the user's tasks.
+Your goal is to understand the user's query and provide relevant information about their tasks.
+
+Current tasks in the system:
+${JSON.stringify(await this.fetchCurrentTasks(), null, 2)}
+
+Previous conversation:
+${this.conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
+
+Analyze the user's query and provide a natural, helpful response about their tasks.
+Consider:
+- If they're asking about specific categories
+- If they're asking about completion status
+- If they're asking about timing or schedules
+- Provide relevant details in a conversational way
+
+You MUST format your response as a JSON object with the following structure:
+{
+  "function": "queryTasks",
+  "parameters": {
+    "response": "Your natural language response here",
+    "filter": {
+      "category": "optional category filter",
+      "completed": true/false (optional completion status filter)
+    }
+  }
+}
+
+Example response:
+{
+  "function": "queryTasks",
+  "parameters": {
+    "response": "You have 3 study tasks: 'Complete math homework' due tomorrow, 'Read chapter 5' due next week, and 'Prepare for exam' due on Friday.",
+    "filter": {
+      "category": "Study"
+    }
+  }
+}
+
+Current query: "${input}"`;
+
+    try {
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text().trim();
+
+      console.log('Raw API Response:', text);
+
+      // Extract JSON from response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No valid JSON found in response');
+      }
+      
+      const jsonText = jsonMatch[0];
+      console.log('Extracted JSON:', jsonText);
+
+      let parsedResponse;
+      try {
+        parsedResponse = JSON.parse(jsonText);
+      } catch (error) {
+        console.error('JSON Parse Error:', error);
+        throw new Error('Failed to parse response JSON');
+      }
+
+      if (!parsedResponse.function || !parsedResponse.parameters || !parsedResponse.parameters.response) {
+        throw new Error('Invalid response structure: missing required fields');
+      }
+
+      if (parsedResponse.function !== 'queryTasks') {
+        throw new Error('Invalid function type: expected queryTasks');
+      }
+
+      const chatResponse = {
+        type: 'conversation',
+        data: {
+          response: parsedResponse.parameters.response
+        }
+      };
+
+      this.conversationHistory.push({ 
+        role: "assistant", 
+        content: parsedResponse.parameters.response 
+      });
+
+      return chatResponse;
+    } catch (error) {
+      console.error('Task Query Error:', error);
+      // Return a more user-friendly error response
+      return {
+        type: 'conversation',
+        data: {
+          response: "I apologize, but I had trouble processing your query about tasks. Could you please try asking in a different way?"
+        }
+      };
+    }
+  }
+
+  async fetchCurrentTasks() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+      return [];
     }
   }
 }
