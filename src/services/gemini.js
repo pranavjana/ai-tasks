@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize Supabase client using environment variables
+// Initialize Supabase client
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -10,363 +10,296 @@ const supabase = createClient(
 class GeminiService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-    this.model = this.genAI.getGenerativeModel({ model: "gemini-pro" });
-    this.conversationHistory = []; // Add conversation history array
-
-    // Define available functions
-    this.functions = {
-      createReminder: {
-        name: "createReminder",
-        description: "Creates a new reminder with the specified details",
-        parameters: {
-          type: "object",
-          properties: {
-            title: {
-              type: "string",
-              description: "Brief title of the reminder"
-            },
-            description: {
-              type: "string",
-              description: "Detailed description of what needs to be done"
-            },
-            schedule: {
-              type: "string",
-              description: "When the reminder should occur (e.g., 'Daily', 'Every Monday')"
-            },
-            time: {
-              type: "string",
-              description: "Time of day for the reminder"
-            },
-            category: {
-              type: "string",
-              description: "Category of the task (e.g., 'Work', 'Personal', 'Health', 'Shopping', 'Home', 'Study', 'Social', 'Other')",
-              enum: ["Work", "Personal", "Health", "Shopping", "Home", "Study", "Social", "Other"]
-            }
-          },
-          required: ["title", "category"]
-        }
+    this.model = this.genAI.getGenerativeModel({ 
+      model: "gemini-2.0-flash",
+      generationConfig: {
+        temperature: 0.1,
+        topK: 1,
+        topP: 1,
+        maxOutputTokens: 2048,
       },
-      queryTasks: {
-        name: "queryTasks",
-        description: "Queries existing tasks and responds with relevant information",
-        parameters: {
-          type: "object",
-          properties: {
-            response: {
-              type: "string",
-              description: "Natural language response about the tasks"
-            },
-            filter: {
-              type: "object",
-              properties: {
-                category: {
-                  type: "string",
-                  description: "Filter by category"
-                },
-                completed: {
-                  type: "boolean",
-                  description: "Filter by completion status"
-                }
-              }
-            }
-          },
-          required: ["response"]
-        }
-      },
-      chat: {
-        name: "chat",
-        description: "Responds to general conversation with a friendly message",
-        parameters: {
-          type: "object",
-          properties: {
-            response: {
-              type: "string",
-              description: "A friendly conversational response"
-            }
-          },
-          required: ["response"]
-        }
-      }
-    };
+    });
   }
 
-  async createTask(input) {
-    // First, check if this is a query about existing tasks
-    const queryIndicators = [
-      "what", "which", "show", "tell", "list", "do i have", 
-      "are there", "how many", "any", "find", "search"
-    ];
-    
-    const isTaskQuery = queryIndicators.some(indicator => 
-      input.toLowerCase().includes(indicator)
-    );
+  async determineRequestType(input) {
+    console.log('🔍 Determining request type for input:', input);
 
-    if (isTaskQuery) {
-      return this.handleTaskQuery(input);
-    }
-
-    this.conversationHistory.push({ role: "user", content: input });
-
-    const prompt = `You are a versatile AI assistant that can handle both reminder management and general conversations.
-You have access to the conversation history to maintain context.
-
-Previous conversation:
-${this.conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
-
-Your task is to analyze the user's input and call the appropriate function.
-When creating a reminder, you must intelligently deduce the most appropriate category for the task.
-
-Categories and their typical use cases:
-- Work: Professional tasks, meetings, deadlines, work-related calls
-- Personal: Self-care, errands, personal appointments
-- Health: Exercise, medication, doctor appointments, wellness activities
-- Shopping: Groceries, online orders, shopping lists
-- Home: Cleaning, maintenance, repairs, household chores
-- Study: Homework, research, learning activities, courses
-- Social: Meetups, calls with friends, social events, birthdays
-- Other: Anything that doesn't fit the above categories
-
-Available functions:
-${JSON.stringify(this.functions, null, 2)}
-
-Remember:
-- Only call ONE function per response
-- Always include a category when creating a reminder
-- Choose the most appropriate category based on the task context
-- Format your response as a valid JSON object with 'function' and 'parameters' fields
-- Do not include any additional text or markdown formatting
-
-Example response format:
+    const typePrompt = `Analyze this input: "${input}"
+You must respond with ONLY a JSON object in this exact format (no markdown, no backticks, no explanation):
 {
-  "function": "createReminder",
-  "parameters": {
-    "title": "Example task",
-    "category": "Work",
-    "description": "Optional description",
-    "schedule": "Optional schedule",
-    "time": "Optional time"
-  }
+  "type": "date_query" or "reminder" or "conversation",
+  "explanation": "Brief explanation of why this type was chosen",
+  "is_question": true or false
 }
 
-Current input: "${input}"`;
+Examples:
+- "how are you" -> {"type": "conversation", "explanation": "This is a general conversational question", "is_question": true}
+- "remind me to buy milk" -> {"type": "reminder", "explanation": "User wants to create a reminder", "is_question": false}
+- "what's next Friday's date" -> {"type": "date_query", "explanation": "User is asking about a specific date", "is_question": true}`;
+
+    console.log('📝 Sending type determination prompt:', typePrompt);
 
     try {
-      const result = await this.model.generateContent(prompt);
+      const result = await this.model.generateContent(typePrompt);
       const response = await result.response;
       const text = response.text().trim();
+      console.log('📄 Raw LLM response:', text);
 
-      console.log('Raw API Response:', text);
+      // Clean up the response to ensure it's valid JSON
+      const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+      console.log('🧹 Cleaned JSON:', cleanJson);
 
-      // Try to extract JSON from the response if it's wrapped in markdown or has extra text
-      let jsonText = text;
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        jsonText = jsonMatch[0];
-      }
-
-      console.log('Extracted JSON:', jsonText);
-
-      let parsedResponse;
-      try {
-        parsedResponse = JSON.parse(jsonText);
-      } catch (parseError) {
-        console.error('JSON Parse Error:', parseError);
-        throw new Error('Invalid response format from AI');
-      }
-
-      if (!parsedResponse.function || !parsedResponse.parameters) {
-        console.error('Missing required fields:', parsedResponse);
-        throw new Error('Invalid response structure: missing required fields');
-      }
-
-      if (parsedResponse.function === 'createReminder') {
-        if (!parsedResponse.parameters.title || !parsedResponse.parameters.category) {
-          console.error('Missing required parameters:', parsedResponse.parameters);
-          throw new Error('Invalid reminder: missing required parameters');
-        }
-
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
-        if (userError) throw userError;
-
-        const task = {
-          title: parsedResponse.parameters.title,
-          description: parsedResponse.parameters.description || '',
-          schedule: parsedResponse.parameters.schedule || '',
-          time: parsedResponse.parameters.time || '',
-          category: parsedResponse.parameters.category,
-          completed: false,
-          user_id: user.id
-        };
-
-        const { data, error } = await supabase
-          .from('tasks')
-          .insert([task])
-          .select();
-
-        if (error) {
-          console.error("Supabase Error:", error);
-          throw error;
-        }
-
-        const taskResponse = {
-          type: 'task',
-          data: {
-            ...task,
-            id: data[0].id
-          }
-        };
-
-        this.conversationHistory.push({ 
-          role: "assistant", 
-          content: `Created reminder: ${task.title} (Category: ${task.category})`
-        });
-        
-        return taskResponse;
-      } else if (parsedResponse.function === 'chat') {
-        if (!parsedResponse.parameters.response) {
-          throw new Error('Invalid chat response: missing response parameter');
-        }
-
-        const chatResponse = {
-          type: 'conversation',
-          data: {
-            response: parsedResponse.parameters.response
-          }
-        };
-
-        this.conversationHistory.push({ 
-          role: "assistant", 
-          content: parsedResponse.parameters.response 
-        });
-
-        return chatResponse;
-      }
-
-      throw new Error('Unknown function type: ' + parsedResponse.function);
+      const typeInfo = JSON.parse(cleanJson);
+      console.log('✨ Parsed type info:', typeInfo);
+      return typeInfo;
     } catch (error) {
-      console.error('Detailed Error:', error);
-      // Add error to conversation history to help debug
-      this.conversationHistory.push({ 
-        role: "error", 
-        content: error.message 
-      });
-      throw error;
-    }
-  }
-
-  async handleTaskQuery(input) {
-    this.conversationHistory.push({ role: "user", content: input });
-
-    const prompt = `You are a helpful AI assistant that can query and provide information about the user's tasks.
-Your goal is to understand the user's query and provide relevant information about their tasks.
-
-Current tasks in the system:
-${JSON.stringify(await this.fetchCurrentTasks(), null, 2)}
-
-Previous conversation:
-${this.conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
-
-Analyze the user's query and provide a natural, helpful response about their tasks.
-Consider:
-- If they're asking about specific categories
-- If they're asking about completion status
-- If they're asking about timing or schedules
-- Provide relevant details in a conversational way
-
-You MUST format your response as a JSON object with the following structure:
-{
-  "function": "queryTasks",
-  "parameters": {
-    "response": "Your natural language response here",
-    "filter": {
-      "category": "optional category filter",
-      "completed": true/false (optional completion status filter)
-    }
-  }
-}
-
-Example response:
-{
-  "function": "queryTasks",
-  "parameters": {
-    "response": "You have 3 study tasks: 'Complete math homework' due tomorrow, 'Read chapter 5' due next week, and 'Prepare for exam' due on Friday.",
-    "filter": {
-      "category": "Study"
-    }
-  }
-}
-
-Current query: "${input}"`;
-
-    try {
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text().trim();
-
-      console.log('Raw API Response:', text);
-
-      // Extract JSON from response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No valid JSON found in response');
-      }
-      
-      const jsonText = jsonMatch[0];
-      console.log('Extracted JSON:', jsonText);
-
-      let parsedResponse;
-      try {
-        parsedResponse = JSON.parse(jsonText);
-      } catch (error) {
-        console.error('JSON Parse Error:', error);
-        throw new Error('Failed to parse response JSON');
-      }
-
-      if (!parsedResponse.function || !parsedResponse.parameters || !parsedResponse.parameters.response) {
-        throw new Error('Invalid response structure: missing required fields');
-      }
-
-      if (parsedResponse.function !== 'queryTasks') {
-        throw new Error('Invalid function type: expected queryTasks');
-      }
-
-      const chatResponse = {
-        type: 'conversation',
-        data: {
-          response: parsedResponse.parameters.response
-        }
+      console.error('❌ Error determining request type:', error);
+      return { 
+        type: 'conversation', 
+        explanation: 'Failed to determine request type: ' + error.message,
+        is_question: false
       };
+    }
+  }
 
-      this.conversationHistory.push({ 
-        role: "assistant", 
-        content: parsedResponse.parameters.response 
-      });
+  async handleDateQuery(input) {
+    const today = new Date();
+    const currentDay = today.getDate().toString().padStart(2, '0');
+    const currentMonth = (today.getMonth() + 1).toString().padStart(2, '0');
+    
+    const prompt = `Today is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${input}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
+Return ONLY the date in YYYY-MM-DD format, nothing else.`;
 
-      return chatResponse;
+    try {
+      console.log('Current date:', `2025-${currentMonth}-${currentDay}`);
+      console.log('Sending date prompt:', prompt);
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text().trim();
+      console.log('Raw LLM response:', text);
+      
+      const dateMatch = text.match(/\d{4}-\d{2}-\d{2}/);
+      const finalResponse = dateMatch ? dateMatch[0] : text;
+      console.log('Final response:', finalResponse);
+      
+      return {
+        type: 'conversation',
+        data: { response: finalResponse }
+      };
     } catch (error) {
-      console.error('Task Query Error:', error);
-      // Return a more user-friendly error response
+      console.error('Error getting date:', error);
       return {
         type: 'conversation',
         data: {
-          response: "I apologize, but I had trouble processing your query about tasks. Could you please try asking in a different way?"
+          response: "Sorry, I couldn't process that date query. Please try again."
         }
       };
     }
   }
 
-  async fetchCurrentTasks() {
+  async handleReminder(input) {
+    // First, let's extract all reminders from the input
+    const extractRemindersPrompt = `Extract ALL reminders from this text: "${input}"
+You must respond with ONLY a JSON array of reminder objects in this exact format (no markdown, no backticks, no explanation):
+[
+  {
+    "title": "Brief title of the reminder",
+    "description": "Full description if any",
+    "category": "One of: Work, Personal, Health, Shopping, Home, Study, Social, Other",
+    "date_query": "The date-related part of the request",
+    "time": "The time if specified (in 24-hour format HH:mm), or null if no time specified"
+  }
+]`;
+
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      // Get all reminders info from Gemini
+      console.log('Sending extract reminders prompt:', extractRemindersPrompt);
+      const result = await this.model.generateContent(extractRemindersPrompt);
+      const response = await result.response;
+      const text = response.text().trim();
+      
+      const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+      console.log('Cleaned JSON text:', cleanJson);
+      
+      const remindersInfo = JSON.parse(cleanJson);
+      console.log('Parsed reminders info:', remindersInfo);
+
+      if (!Array.isArray(remindersInfo) || remindersInfo.length === 0) {
+        throw new Error('No reminders extracted from input');
+      }
+
+      // Get user once for all reminders
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw new Error('Authentication error: ' + userError.message);
+      if (!user) throw new Error('No authenticated user found');
+
+      // Get current date for date calculations
+      const today = new Date();
+      const currentDay = today.getDate().toString().padStart(2, '0');
+      const currentMonth = (today.getMonth() + 1).toString().padStart(2, '0');
+
+      // Process each reminder
+      const createdTasks = [];
+      const errors = [];
+
+      for (const reminderInfo of remindersInfo) {
+        try {
+          // Validate reminder info
+          if (!reminderInfo.title) throw new Error('No title extracted from reminder');
+          if (!reminderInfo.date_query) throw new Error('No date found in reminder');
+
+          // Get the actual date
+          const dateResult = await this.model.generateContent(
+            `Today is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${reminderInfo.date_query}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
+Return ONLY the date in YYYY-MM-DD format, nothing else.`
+          );
+          const dateResponse = await dateResult.response;
+          const dateText = dateResponse.text().trim();
+          const dateMatch = dateText.match(/\d{4}-\d{2}-\d{2}/);
+          const scheduleDate = dateMatch ? dateMatch[0] : null;
+
+          if (!scheduleDate) throw new Error('Could not determine reminder date');
+
+          // Validate and format time if provided
+          let formattedTime = null;
+          if (reminderInfo.time) {
+            const timeMatch = reminderInfo.time.match(/^([0-9]{2}):([0-9]{2})$/);
+            if (timeMatch) {
+              const [_, hours, minutes] = timeMatch;
+              if (parseInt(hours) >= 0 && parseInt(hours) < 24 && 
+                  parseInt(minutes) >= 0 && parseInt(minutes) < 60) {
+                formattedTime = `${hours}:${minutes}`;
+              }
+            }
+          }
+
+          // Prepare the task data
+          const taskData = {
+            user_id: user.id,
+            title: reminderInfo.title,
+            description: reminderInfo.description || '',
+            category: reminderInfo.category || 'Other',
+            schedule: scheduleDate,
+            time: formattedTime,
+            completed: false,
+            created_at: new Date().toISOString()
+          };
+
+          console.log('Inserting task into Supabase:', taskData);
+
+          // Insert into Supabase
+          const { data, error } = await supabase
+            .from('tasks')
+            .insert([taskData])
+            .select('*')
+            .single();
+
+          if (error) throw new Error('Database error: ' + error.message);
+          if (!data) throw new Error('No data returned from task creation');
+
+          createdTasks.push(data);
+        } catch (error) {
+          errors.push(`Failed to create reminder "${reminderInfo.title}": ${error.message}`);
+        }
+      }
+
+      if (createdTasks.length === 0) {
+        throw new Error('Failed to create any reminders: ' + errors.join('; '));
+      }
+
+      console.log('Successfully created tasks:', createdTasks);
+
+      // Return all created tasks
+      return {
+        type: 'multiple_tasks',
+        data: createdTasks,
+        message: `Created ${createdTasks.length} reminders successfully!`
+      };
+    } catch (error) {
+      console.error('Error creating reminder(s):', error);
+      return {
+        type: 'conversation',
+        data: {
+          response: `Sorry, I couldn't create the reminder(s). Error: ${error.message}`
+        }
+      };
+    }
+  }
+
+  async handleConversation(input) {
+    const prompt = `Respond naturally to this user input: "${input}"
+Keep the response brief and friendly. If it's a question, provide a helpful answer.`;
+
+    try {
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text().trim();
+      
+      return {
+        type: 'conversation',
+        data: { response: text }
+      };
+    } catch (error) {
+      console.error('Error in conversation:', error);
+      return {
+        type: 'conversation',
+        data: { response: "I'm sorry, I didn't understand that. Could you rephrase?" }
+      };
+    }
+  }
+
+  async createTask(input) {
+    console.log('Processing input:', input);
+
+    try {
+      // First determine what type of request this is
+      const requestType = await this.determineRequestType(input);
+      console.log('Determined request type:', requestType);
+
+      switch (requestType.type) {
+        case 'date_query':
+          return await this.handleDateQuery(input);
+        
+        case 'reminder':
+          return await this.handleReminder(input);
+        
+        case 'conversation':
+          return await this.handleConversation(input);
+        
+        default:
+          return {
+            type: 'conversation',
+            data: { 
+              response: "I'm not sure how to handle that. Could you try rephrasing your request?" 
+            }
+          };
+      }
+    } catch (error) {
+      console.error('Error in createTask:', error);
+      return {
+        type: 'conversation',
+        data: {
+          response: `Sorry, I couldn't process your request. Error: ${error.message}`
+        }
+      };
+    }
+  }
+
+  async fetchTodos() {
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+
       const { data, error } = await supabase
-        .from('tasks')
-        .select('*')
-        .eq('user_id', user.id);
+        .from('todos')
+        .select('*, subtasks (*)')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error('Error fetching tasks:', error);
+      console.error('Error fetching todos:', error);
       return [];
     }
   }

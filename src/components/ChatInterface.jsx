@@ -2,6 +2,7 @@ import SearchBar from './SearchBar';
 import Timeline from './Timeline';
 import Tasks from './Tasks';
 import TaskCard from './TaskCard';
+import TaskCreationTimeline from './TaskCreationTimeline';
 import { Sidebar, SidebarBody, SidebarLink, useSidebar } from './ui/Sidebar';
 import { MessageSquare, Bell, Calendar, ArrowRight, LayoutDashboard, User, Settings, LogOut } from 'lucide-react';
 import { useState, useEffect } from 'react';
@@ -10,15 +11,16 @@ import Button from './Button';
 import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../lib/utils';
 import TypewriterEffect from './TypewriterEffect';
+import { supabase } from '../lib/supabase';
 
-const Message = ({ content, type = 'user', task, isNew }) => (
+const Message = ({ content, type = 'user', task, tasks, isNew }) => (
   <div className={`flex ${type === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
     <div className={`max-w-[80%] rounded-lg p-3 ${
       type === 'user' 
         ? 'bg-neutral-800 text-white rounded-br-none' 
         : 'bg-transparent text-white rounded-bl-none'
     }`}>
-      {type === 'user' || !isNew ? content : (
+      {type === 'user' ? content : (
         <TypewriterEffect text={content} />
       )}
       {task && (
@@ -31,6 +33,20 @@ const Message = ({ content, type = 'user', task, isNew }) => (
               onClick={() => window.dispatchEvent(new CustomEvent('viewReminders'))}
             >
               View in Reminders <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+          </div>
+        </div>
+      )}
+      {tasks && tasks.length > 0 && (
+        <div className="mt-4">
+          <TaskCreationTimeline tasks={tasks} />
+          <div className="mt-4">
+            <Button 
+              size="sm" 
+              className="w-full hover:bg-neutral-700"
+              onClick={() => window.dispatchEvent(new CustomEvent('viewReminders'))}
+            >
+              View All in Reminders <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           </div>
         </div>
@@ -74,14 +90,29 @@ const UserProfile = ({ user }) => {
 const ChatInterface = ({ initialTasks = [] }) => {
   const [activeSection, setActiveSection] = useState('chat');
   const [reminders, setReminders] = useState(initialTasks);
+  const [todos, setTodos] = useState([]);
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState([]);
   const [newMessageId, setNewMessageId] = useState(null);
   const { user, signOut } = useAuth();
 
   useEffect(() => {
-    setReminders(initialTasks);
-  }, [initialTasks]);
+    // Only set reminders once on mount
+    if (initialTasks.length > 0) {
+      setReminders(initialTasks);
+    }
+    
+    // Fetch todos when component mounts
+    const fetchTodos = async () => {
+      try {
+        const todos = await geminiService.fetchTodos();
+        setTodos(todos);
+      } catch (error) {
+        console.error('Error fetching todos:', error);
+      }
+    };
+    fetchTodos();
+  }, []); // Remove initialTasks dependency
 
   const handleTaskDelete = (taskId) => {
     setReminders(prev => prev.filter(task => task.id !== taskId));
@@ -97,31 +128,111 @@ const ChatInterface = ({ initialTasks = [] }) => {
     }));
   };
 
+  const handleTodoToggle = async (todoId) => {
+    try {
+      const todo = todos.find(t => t.id === todoId);
+      if (!todo) return;
+
+      const { error } = await supabase
+        .from('todos')
+        .update({ completed: !todo.completed })
+        .eq('id', todoId);
+
+      if (error) throw error;
+      
+      setTodos(prev => prev.map(t => 
+        t.id === todoId ? { ...t, completed: !t.completed } : t
+      ));
+    } catch (error) {
+      console.error('Error toggling todo:', error);
+    }
+  };
+
+  const handleSubtaskToggle = async (todoId, subtaskId) => {
+    try {
+      const todo = todos.find(t => t.id === todoId);
+      if (!todo) return;
+
+      const subtask = todo.subtasks?.find(s => s.id === subtaskId);
+      if (!subtask) return;
+
+      const { error } = await supabase
+        .from('subtasks')
+        .update({ completed: !subtask.completed })
+        .eq('id', subtaskId);
+
+      if (error) throw error;
+      
+      setTodos(prev => prev.map(t => {
+        if (t.id !== todoId) return t;
+        return {
+          ...t,
+          subtasks: t.subtasks.map(s =>
+            s.id === subtaskId ? { ...s, completed: !s.completed } : s
+          )
+        };
+      }));
+    } catch (error) {
+      console.error('Error toggling subtask:', error);
+    }
+  };
+
+  const handleTodoDelete = async (todoId) => {
+    try {
+      const { error } = await supabase
+        .from('todos')
+        .delete()
+        .eq('id', todoId);
+
+      if (error) throw error;
+      
+      setTodos(prev => prev.filter(todo => todo.id !== todoId));
+    } catch (error) {
+      console.error('Error deleting todo:', error);
+    }
+  };
+
   const handleUserInput = async (input) => {
     setLoading(true);
-    const messageId = Date.now().toString(); // Generate unique ID for new message
+    const messageId = Date.now().toString();
     
-    // Add user message
     setMessages(prev => [...prev, { id: messageId + '-user', content: input, type: 'user' }]);
     
     try {
       const response = await geminiService.createTask(input);
       
       if (response.type === 'task') {
-        // Handle reminder creation
         setReminders(prev => [response.data, ...prev]);
         const aiMessageId = messageId + '-ai';
-        setNewMessageId(aiMessageId); // Set this as the new message
+        setNewMessageId(aiMessageId);
         setMessages(prev => [...prev, {
           id: aiMessageId,
           content: `I've set up a reminder based on your request. Here's what I've scheduled:`,
           type: 'ai',
           task: response.data
         }]);
-      } else if (response.type === 'conversation') {
-        // Handle general conversation
+      } else if (response.type === 'multiple_tasks') {
+        setReminders(prev => [...response.data, ...prev]);
         const aiMessageId = messageId + '-ai';
-        setNewMessageId(aiMessageId); // Set this as the new message
+        setNewMessageId(aiMessageId);
+        setMessages(prev => [...prev, {
+          id: aiMessageId,
+          content: response.message || `I've set up ${response.data.length} reminders based on your request. Here's what I've scheduled:`,
+          type: 'ai',
+          tasks: response.data
+        }]);
+      } else if (response.type === 'todo') {
+        setTodos(prev => [response.data, ...prev]);
+        const aiMessageId = messageId + '-ai';
+        setNewMessageId(aiMessageId);
+        setMessages(prev => [...prev, {
+          id: aiMessageId,
+          content: `I've added "${response.data.title}" to your to-do list.`,
+          type: 'ai'
+        }]);
+      } else if (response.type === 'conversation') {
+        const aiMessageId = messageId + '-ai';
+        setNewMessageId(aiMessageId);
         setMessages(prev => [...prev, {
           id: aiMessageId,
           content: response.data.response,
@@ -131,7 +242,7 @@ const ChatInterface = ({ initialTasks = [] }) => {
     } catch (error) {
       console.error('Error processing input:', error);
       const errorMessageId = messageId + '-error';
-      setNewMessageId(errorMessageId); // Set this as the new message
+      setNewMessageId(errorMessageId);
       setMessages(prev => [...prev, {
         id: errorMessageId,
         content: "I'm sorry, I couldn't process your request. Please try again.",
@@ -139,7 +250,6 @@ const ChatInterface = ({ initialTasks = [] }) => {
       }]);
     } finally {
       setLoading(false);
-      // Clear the new message ID after a short delay
       setTimeout(() => setNewMessageId(null), 100);
     }
   };
@@ -150,6 +260,17 @@ const ChatInterface = ({ initialTasks = [] }) => {
     window.addEventListener('viewReminders', handleViewReminders);
     return () => window.removeEventListener('viewReminders', handleViewReminders);
   }, []);
+
+  const testLogging = async () => {
+    console.log('Testing console logs...');
+    try {
+      await geminiService.testLog();
+      const response = await geminiService.createTask('what is today\'s date?');
+      console.log('Test response:', response);
+    } catch (error) {
+      console.error('Test error:', error);
+    }
+  };
 
   const sidebarLinks = [
     { 
@@ -280,8 +401,12 @@ const ChatInterface = ({ initialTasks = [] }) => {
           {activeSection === 'reminders' && (
             <div className="h-full overflow-auto">
               <Tasks 
-                tasks={reminders} 
+                tasks={reminders}
+                todos={todos}
                 onTaskDelete={handleTaskDelete}
+                onTodoToggle={handleTodoToggle}
+                onTodoDelete={handleTodoDelete}
+                onSubtaskToggle={handleSubtaskToggle}
               />
             </div>
           )}

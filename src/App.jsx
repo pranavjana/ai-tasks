@@ -21,7 +21,16 @@ function ProtectedApp() {
           { event: '*', schema: 'public', table: 'tasks' }, 
           (payload) => {
             console.log('Change received!', payload);
-            fetchTasks();
+            // Handle different types of changes
+            if (payload.eventType === 'INSERT') {
+              setTasks(prev => [payload.new, ...prev]);
+            } else if (payload.eventType === 'DELETE') {
+              setTasks(prev => prev.filter(task => task.id !== payload.old.id));
+            } else if (payload.eventType === 'UPDATE') {
+              setTasks(prev => prev.map(task => 
+                task.id === payload.new.id ? payload.new : task
+              ));
+            }
           }
         )
         .subscribe();
