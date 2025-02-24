@@ -22,7 +22,45 @@ export default {
           DEFAULT: "rgba(255,255,255,0.1)",
         }
       },
+      typography: {
+        DEFAULT: {
+          css: {
+            color: '#ECECF1',
+            a: {
+              color: '#9333EA',
+              '&:hover': {
+                color: '#A855F7',
+              },
+            },
+            strong: {
+              color: '#FFFFFF',
+            },
+            h1: {
+              color: '#FFFFFF',
+            },
+            h2: {
+              color: '#FFFFFF',
+            },
+            h3: {
+              color: '#FFFFFF',
+            },
+            h4: {
+              color: '#FFFFFF',
+            },
+            code: {
+              color: '#FFFFFF',
+            },
+            blockquote: {
+              color: '#D1D5DB',
+              borderLeftColor: '#4B5563',
+            },
+          },
+        },
+      },
     },
   },
-  plugins: [],
+  plugins: [
+    require('@tailwindcss/typography'),
+    require('tailwind-scrollbar')({ nocompatible: true }),
+  ],
 } 

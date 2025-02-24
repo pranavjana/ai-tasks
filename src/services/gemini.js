@@ -19,12 +19,39 @@ class GeminiService {
         maxOutputTokens: 2048,
       },
     });
+    this.chat = this.model.startChat({
+      history: [],
+      generationConfig: {
+        temperature: 0.1,
+        topK: 1,
+        topP: 1,
+        maxOutputTokens: 2048,
+      },
+    });
+    this.conversationHistory = [];
+  }
+
+  // Helper to add messages to history
+  addToHistory(role, message) {
+    this.conversationHistory.push({ role, message });
+    // Keep only last 10 messages to avoid token limits
+    if (this.conversationHistory.length > 10) {
+      this.conversationHistory = this.conversationHistory.slice(-10);
+    }
+  }
+
+  // Helper to get conversation context
+  getConversationContext() {
+    return this.conversationHistory
+      .map(msg => `${msg.role}: ${msg.message}`)
+      .join('\n');
   }
 
   async determineRequestType(input) {
     console.log('🔍 Determining request type for input:', input);
 
-    const typePrompt = `Analyze this input: "${input}"
+    const context = this.getConversationContext();
+    const typePrompt = `Previous conversation:\n${context}\n\nAnalyze this input: "${input}"
 You must respond with ONLY a JSON object in this exact format (no markdown, no backticks, no explanation):
 {
   "type": "date_query" or "reminder" or "conversation" or "todo_list",
@@ -42,7 +69,7 @@ Examples:
     console.log('📝 Sending type determination prompt:', typePrompt);
 
     try {
-      const result = await this.model.generateContent(typePrompt);
+      const result = await this.chat.sendMessage(typePrompt);
       const response = await result.response;
       const text = response.text().trim();
       console.log('📄 Raw LLM response:', text);
@@ -53,6 +80,11 @@ Examples:
 
       const typeInfo = JSON.parse(cleanJson);
       console.log('✨ Parsed type info:', typeInfo);
+
+      // Add to conversation history
+      this.addToHistory('user', input);
+      this.addToHistory('assistant', `Request type: ${typeInfo.type}`);
+
       return typeInfo;
     } catch (error) {
       console.error('❌ Error determining request type:', error);
@@ -65,17 +97,18 @@ Examples:
   }
 
   async handleDateQuery(input) {
+    const context = this.getConversationContext();
     const today = new Date();
     const currentDay = today.getDate().toString().padStart(2, '0');
     const currentMonth = (today.getMonth() + 1).toString().padStart(2, '0');
     
-    const prompt = `Today is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${input}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
+    const prompt = `Previous conversation:\n${context}\n\nToday is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${input}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
 Return ONLY the date in YYYY-MM-DD format, nothing else.`;
 
     try {
       console.log('Current date:', `2025-${currentMonth}-${currentDay}`);
       console.log('Sending date prompt:', prompt);
-      const result = await this.model.generateContent(prompt);
+      const result = await this.chat.sendMessage(prompt);
       const response = await result.response;
       const text = response.text().trim();
       console.log('Raw LLM response:', text);
@@ -83,6 +116,10 @@ Return ONLY the date in YYYY-MM-DD format, nothing else.`;
       const dateMatch = text.match(/\d{4}-\d{2}-\d{2}/);
       const finalResponse = dateMatch ? dateMatch[0] : text;
       console.log('Final response:', finalResponse);
+
+      // Add to conversation history
+      this.addToHistory('user', input);
+      this.addToHistory('assistant', finalResponse);
       
       return {
         type: 'conversation',
@@ -100,8 +137,9 @@ Return ONLY the date in YYYY-MM-DD format, nothing else.`;
   }
 
   async handleReminder(input) {
+    const context = this.getConversationContext();
     // First, let's extract all reminders from the input
-    const extractRemindersPrompt = `Extract ALL reminders from this text: "${input}"
+    const extractRemindersPrompt = `Previous conversation:\n${context}\n\nExtract ALL reminders from this text: "${input}"
 You must respond with ONLY a JSON array of reminder objects in this exact format (no markdown, no backticks, no explanation):
 [
   {
@@ -116,7 +154,7 @@ You must respond with ONLY a JSON array of reminder objects in this exact format
     try {
       // Get all reminders info from Gemini
       console.log('Sending extract reminders prompt:', extractRemindersPrompt);
-      const result = await this.model.generateContent(extractRemindersPrompt);
+      const result = await this.chat.sendMessage(extractRemindersPrompt);
       const response = await result.response;
       const text = response.text().trim();
       
@@ -125,6 +163,10 @@ You must respond with ONLY a JSON array of reminder objects in this exact format
       
       const remindersInfo = JSON.parse(cleanJson);
       console.log('Parsed reminders info:', remindersInfo);
+
+      // Add to conversation history
+      this.addToHistory('user', input);
+      this.addToHistory('assistant', `Extracted ${remindersInfo.length} reminder(s)`);
 
       if (!Array.isArray(remindersInfo) || remindersInfo.length === 0) {
         throw new Error('No reminders extracted from input');
@@ -150,11 +192,11 @@ You must respond with ONLY a JSON array of reminder objects in this exact format
           if (!reminderInfo.title) throw new Error('No title extracted from reminder');
           if (!reminderInfo.date_query) throw new Error('No date found in reminder');
 
-          // Get the actual date
-          const dateResult = await this.model.generateContent(
-            `Today is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${reminderInfo.date_query}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
-Return ONLY the date in YYYY-MM-DD format, nothing else.`
-          );
+          // Get the actual date using chat context
+          const datePrompt = `Previous conversation:\n${context}\n\nToday is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${reminderInfo.date_query}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
+Return ONLY the date in YYYY-MM-DD format, nothing else.`;
+
+          const dateResult = await this.chat.sendMessage(datePrompt);
           const dateResponse = await dateResult.response;
           const dateText = dateResponse.text().trim();
           const dateMatch = dateText.match(/\d{4}-\d{2}-\d{2}/);
@@ -229,14 +271,19 @@ Return ONLY the date in YYYY-MM-DD format, nothing else.`
   }
 
   async handleConversation(input) {
-    const prompt = `Respond naturally to this user input: "${input}"
+    const context = this.getConversationContext();
+    const prompt = `Previous conversation:\n${context}\n\nRespond naturally to this user input: "${input}"
 Keep the response brief and friendly. If it's a question, provide a helpful answer.`;
 
     try {
-      const result = await this.model.generateContent(prompt);
+      const result = await this.chat.sendMessage(prompt);
       const response = await result.response;
       const text = response.text().trim();
       
+      // Add to conversation history
+      this.addToHistory('user', input);
+      this.addToHistory('assistant', text);
+
       return {
         type: 'conversation',
         data: { response: text }
@@ -251,7 +298,8 @@ Keep the response brief and friendly. If it's a question, provide a helpful answ
   }
 
   async handleTodoList(input) {
-    const extractTodoPrompt = `Extract todo list information from this text: "${input}"
+    const context = this.getConversationContext();
+    const extractTodoPrompt = `Previous conversation:\n${context}\n\nExtract todo list information from this text: "${input}"
 You must respond with ONLY a JSON object in this exact format (no markdown, no backticks, no explanation):
 {
   "title": "Main title for the todo list",
@@ -266,7 +314,7 @@ You must respond with ONLY a JSON object in this exact format (no markdown, no b
     try {
       // Get todo list info from Gemini
       console.log('Sending extract todo prompt:', extractTodoPrompt);
-      const result = await this.model.generateContent(extractTodoPrompt);
+      const result = await this.chat.sendMessage(extractTodoPrompt);
       const response = await result.response;
       const text = response.text().trim();
       
@@ -275,6 +323,10 @@ You must respond with ONLY a JSON object in this exact format (no markdown, no b
       
       const todoInfo = JSON.parse(cleanJson);
       console.log('Parsed todo info:', todoInfo);
+
+      // Add to conversation history
+      this.addToHistory('user', input);
+      this.addToHistory('assistant', `Created todo list: ${todoInfo.title}`);
 
       // Get user
       const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -288,10 +340,10 @@ You must respond with ONLY a JSON object in this exact format (no markdown, no b
         const currentDay = today.getDate().toString().padStart(2, '0');
         const currentMonth = (today.getMonth() + 1).toString().padStart(2, '0');
         
-        const dateResult = await this.model.generateContent(
-          `Today is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${todoInfo.date_query}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
-Return ONLY the date in YYYY-MM-DD format, nothing else.`
-        );
+        const datePrompt = `Previous conversation:\n${context}\n\nToday is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${todoInfo.date_query}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
+Return ONLY the date in YYYY-MM-DD format, nothing else.`;
+
+        const dateResult = await this.chat.sendMessage(datePrompt);
         const dateResponse = await dateResult.response;
         const dateText = dateResponse.text().trim();
         const dateMatch = dateText.match(/\d{4}-\d{2}-\d{2}/);

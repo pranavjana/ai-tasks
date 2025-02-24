@@ -4,7 +4,7 @@ import Tasks from './Tasks';
 import TaskCard from './TaskCard';
 import TaskCreationTimeline from './TaskCreationTimeline';
 import { Sidebar, SidebarBody, SidebarLink, useSidebar } from './ui/Sidebar';
-import { MessageSquare, Bell, Calendar, ArrowRight, LayoutDashboard, User, Settings, LogOut } from 'lucide-react';
+import { MessageSquare, Bell, Calendar, ArrowRight, LayoutDashboard, User, Settings, LogOut, Check, ChevronRight, Copy, CheckCheck } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import geminiService from '../services/gemini';
 import Button from './Button';
@@ -13,15 +13,194 @@ import { cn } from '../lib/utils';
 import TypewriterEffect from './TypewriterEffect';
 import { supabase } from '../lib/supabase';
 
+const CodeBlock = ({ language, content }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="rounded-lg overflow-hidden bg-[#1E1E1E] my-2 border border-neutral-800">
+      <div className="flex items-center justify-between px-4 py-2 bg-[#2A2A2A] border-b border-neutral-800">
+        <span className="text-sm text-neutral-400 font-medium">
+          {language || 'Code'}
+        </span>
+        <button
+          onClick={handleCopy}
+          className="p-1 hover:bg-neutral-700 rounded-md transition-colors"
+        >
+          {copied ? (
+            <CheckCheck className="w-4 h-4 text-green-400" />
+          ) : (
+            <Copy className="w-4 h-4 text-neutral-400" />
+          )}
+        </button>
+      </div>
+      <pre className="p-4 overflow-x-auto">
+        <code className="font-mono text-[15px] text-[#A9B1D6]">{content}</code>
+      </pre>
+    </div>
+  );
+};
+
+const FormattedMessage = ({ content }) => {
+  // Process the content to handle both numbered lists and bullet points
+  const processContent = (text) => {
+    // Split into lines while preserving empty lines
+    const lines = text.split('\n');
+    const sections = [];
+    let currentSection = [];
+    let inCodeBlock = false;
+    let codeBlockContent = [];
+
+    lines.forEach((line) => {
+      const trimmedLine = line.trim();
+      
+      // Handle code blocks
+      if (trimmedLine.startsWith('```')) {
+        if (inCodeBlock) {
+          // End of code block
+          if (currentSection.length > 0) {
+            sections.push(currentSection.join('\n'));
+            currentSection = [];
+          }
+          sections.push({
+            type: 'code',
+            content: codeBlockContent.join('\n'),
+            language: trimmedLine.slice(3)
+          });
+          codeBlockContent = [];
+          inCodeBlock = false;
+        } else {
+          // Start of code block
+          if (currentSection.length > 0) {
+            sections.push(currentSection.join('\n'));
+            currentSection = [];
+          }
+          inCodeBlock = true;
+        }
+        return;
+      }
+
+      if (inCodeBlock) {
+        codeBlockContent.push(line);
+        return;
+      }
+
+      // Handle regular content
+      const isNumbered = /^\d+\.\s/.test(trimmedLine);
+      const isBullet = trimmedLine.startsWith('* ');
+      
+      if (isNumbered || isBullet || trimmedLine === '') {
+        if (currentSection.length > 0) {
+          sections.push(currentSection.join('\n'));
+          currentSection = [];
+        }
+        if (trimmedLine !== '') {
+          sections.push(trimmedLine);
+        }
+      } else {
+        currentSection.push(line);
+      }
+    });
+
+    if (currentSection.length > 0) {
+      sections.push(currentSection.join('\n'));
+    }
+
+    return sections;
+  };
+
+  const formatText = (text) => {
+    // Split text to handle inline code and bold text
+    return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/).map((part, index) => {
+      if (part.startsWith('`') && part.endsWith('`')) {
+        // Inline code
+        return (
+          <code key={index} className="px-1.5 py-0.5 rounded-md bg-[#2A2A2A] font-mono text-[15px] text-[#A9B1D6]">
+            {part.slice(1, -1)}
+          </code>
+        );
+      } else if (part.startsWith('**') && part.endsWith('**')) {
+        // Bold text
+        return <strong key={index} className="text-white font-semibold">{part.slice(2, -2)}</strong>;
+      }
+      return part;
+    });
+  };
+
+  const sections = processContent(content);
+
+  return (
+    <div className="space-y-4 text-[15px]">
+      {sections.map((section, index) => {
+        // Handle code blocks
+        if (typeof section === 'object' && section.type === 'code') {
+          return <CodeBlock key={index} language={section.language} content={section.content} />;
+        }
+        // Handle numbered lists
+        else if (typeof section === 'string' && /^\d+\.\s/.test(section)) {
+          const [number, ...rest] = section.split(/(?<=^\d+\.\s)/);
+          const content = rest.join('').trim();
+          return (
+            <div key={index} className="flex items-start gap-3 group">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center mt-0.5">
+                <span className="text-sm text-neutral-400 group-hover:text-white transition-colors">
+                  {number.replace('.', '')}
+                </span>
+              </div>
+              <div className="flex-1 text-neutral-300">
+                {formatText(content)}
+              </div>
+            </div>
+          );
+        }
+        // Handle bullet points
+        else if (typeof section === 'string' && section.startsWith('* ')) {
+          const content = section.substring(2);
+          return (
+            <div key={index} className="flex items-start gap-3 group">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center mt-0.5">
+                <Check className="w-3.5 h-3.5 text-neutral-400 group-hover:text-white transition-colors" />
+              </div>
+              <div className="flex-1 text-neutral-300">
+                {formatText(content)}
+              </div>
+            </div>
+          );
+        }
+        // Regular text
+        else {
+          return (
+            <p key={index} className="text-neutral-300">
+              {formatText(section)}
+            </p>
+          );
+        }
+      })}
+    </div>
+  );
+};
+
 const Message = ({ content, type = 'user', task, tasks, isNew }) => (
   <div className={`flex ${type === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
-    <div className={`max-w-[80%] rounded-lg p-3 ${
+    <div className={cn(
+      "max-w-[80%] rounded-lg p-4",
       type === 'user' 
-        ? 'bg-neutral-800 text-white rounded-br-none' 
-        : 'bg-transparent text-white rounded-bl-none'
-    }`}>
-      {type === 'user' ? content : (
-        <TypewriterEffect text={content} />
+        ? "bg-neutral-800 text-white rounded-br-none" 
+        : "bg-neutral-900/50 backdrop-blur-sm text-white rounded-bl-none border border-neutral-800/50"
+    )}>
+      {type === 'user' ? (
+        <p className="text-white">{content}</p>
+      ) : (
+        isNew ? (
+          <TypewriterEffect text={content} />
+        ) : (
+          <FormattedMessage content={content} />
+        )
       )}
       {task && (
         <div className="mt-4">
@@ -32,7 +211,7 @@ const Message = ({ content, type = 'user', task, tasks, isNew }) => (
               className="w-full hover:bg-neutral-700"
               onClick={() => window.dispatchEvent(new CustomEvent('viewReminders'))}
             >
-              View in Reminders <ArrowRight className="w-4 h-4 ml-2" />
+              View in Reminders <ChevronRight className="w-4 h-4 ml-2" />
             </Button>
           </div>
         </div>
@@ -46,7 +225,7 @@ const Message = ({ content, type = 'user', task, tasks, isNew }) => (
               className="w-full hover:bg-neutral-700"
               onClick={() => window.dispatchEvent(new CustomEvent('viewReminders'))}
             >
-              View All in Reminders <ArrowRight className="w-4 h-4 ml-2" />
+              View All in Reminders <ChevronRight className="w-4 h-4 ml-2" />
             </Button>
           </div>
         </div>

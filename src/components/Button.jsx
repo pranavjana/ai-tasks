@@ -24,6 +24,11 @@ const Button = ({
           "hover:bg-neutral-800/50",
           "active:bg-neutral-800",
         ],
+        variant === 'send' && [
+          "bg-neutral-800 text-neutral-400",
+          "hover:bg-neutral-700",
+          "data-[active=true]:bg-purple-500/10 data-[active=true]:text-purple-400",
+        ],
         
         // Sizes
         size === 'default' && "h-9 px-4 py-2",
