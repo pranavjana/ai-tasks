@@ -1,34 +1,41 @@
 import { cn } from '../lib/utils';
 
-const Button = ({ children, variant = 'default', size = 'default', className, onClick, icon }) => {
-  const baseStyles = 'inline-flex items-center justify-center transition-colors focus-visible:outline-none disabled:cursor-not-allowed';
-  
-  const variants = {
-    default: 'bg-black text-white hover:bg-neutral-900 rounded-lg',
-    ghost: 'text-neutral-400 hover:text-white hover:bg-neutral-900 rounded-lg',
-    icon: 'text-neutral-400 hover:text-white rounded-lg',
-    send: 'enabled:bg-violet-500 enabled:text-white disabled:bg-neutral-700 disabled:text-neutral-400 rounded-full'
-  };
-  
-  const sizes = {
-    default: 'h-10 px-4 py-2 text-sm',
-    sm: 'h-8 px-3 text-xs',
-    lg: 'h-11 px-8 text-sm',
-    icon: 'h-8 w-8'
-  };
-
+const Button = ({ 
+  children, 
+  variant = 'default', 
+  size = 'default',
+  className,
+  ...props 
+}) => {
   return (
     <button
-      type="submit"
-      className={cn(baseStyles, variants[variant], sizes[size], className)}
-      onClick={onClick}
-      disabled={onClick === undefined}
+      className={cn(
+        // Base styles
+        "inline-flex items-center justify-center rounded-md font-medium transition-colors",
+        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-neutral-700",
+        "disabled:pointer-events-none disabled:opacity-50",
+        
+        // Variants
+        variant === 'default' && [
+          "bg-neutral-800 text-white hover:bg-neutral-700",
+          "active:bg-neutral-600",
+        ],
+        variant === 'ghost' && [
+          "hover:bg-neutral-800/50",
+          "active:bg-neutral-800",
+        ],
+        
+        // Sizes
+        size === 'default' && "h-9 px-4 py-2",
+        size === 'sm' && "h-8 px-3 rounded-md",
+        size === 'lg' && "h-10 px-8 rounded-md",
+        size === 'icon' && "h-9 w-9",
+        
+        className
+      )}
+      {...props}
     >
-      {icon ? (
-        <span className="flex items-center justify-center w-full h-full">
-          {icon}
-        </span>
-      ) : children}
+      {children}
     </button>
   );
 };

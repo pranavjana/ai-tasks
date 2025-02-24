@@ -27,7 +27,7 @@ class GeminiService {
     const typePrompt = `Analyze this input: "${input}"
 You must respond with ONLY a JSON object in this exact format (no markdown, no backticks, no explanation):
 {
-  "type": "date_query" or "reminder" or "conversation",
+  "type": "date_query" or "reminder" or "conversation" or "todo_list",
   "explanation": "Brief explanation of why this type was chosen",
   "is_question": true or false
 }
@@ -35,7 +35,9 @@ You must respond with ONLY a JSON object in this exact format (no markdown, no b
 Examples:
 - "how are you" -> {"type": "conversation", "explanation": "This is a general conversational question", "is_question": true}
 - "remind me to buy milk" -> {"type": "reminder", "explanation": "User wants to create a reminder", "is_question": false}
-- "what's next Friday's date" -> {"type": "date_query", "explanation": "User is asking about a specific date", "is_question": true}`;
+- "what's next Friday's date" -> {"type": "date_query", "explanation": "User is asking about a specific date", "is_question": true}
+- "create a todo list for my project" -> {"type": "todo_list", "explanation": "User wants to create a todo list", "is_question": false}
+- "add a list of tasks for tomorrow" -> {"type": "todo_list", "explanation": "User wants to create a list of tasks", "is_question": false}`;
 
     console.log('📝 Sending type determination prompt:', typePrompt);
 
@@ -248,6 +250,117 @@ Keep the response brief and friendly. If it's a question, provide a helpful answ
     }
   }
 
+  async handleTodoList(input) {
+    const extractTodoPrompt = `Extract todo list information from this text: "${input}"
+You must respond with ONLY a JSON object in this exact format (no markdown, no backticks, no explanation):
+{
+  "title": "Main title for the todo list",
+  "date_query": "The date-related part of the request, if any",
+  "subtasks": [
+    {
+      "content": "Description of the subtask"
+    }
+  ]
+}`;
+
+    try {
+      // Get todo list info from Gemini
+      console.log('Sending extract todo prompt:', extractTodoPrompt);
+      const result = await this.model.generateContent(extractTodoPrompt);
+      const response = await result.response;
+      const text = response.text().trim();
+      
+      const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+      console.log('Cleaned JSON text:', cleanJson);
+      
+      const todoInfo = JSON.parse(cleanJson);
+      console.log('Parsed todo info:', todoInfo);
+
+      // Get user
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw new Error('Authentication error: ' + userError.message);
+      if (!user) throw new Error('No authenticated user found');
+
+      // Get the due date if specified
+      let dueDate = null;
+      if (todoInfo.date_query) {
+        const today = new Date();
+        const currentDay = today.getDate().toString().padStart(2, '0');
+        const currentMonth = (today.getMonth() + 1).toString().padStart(2, '0');
+        
+        const dateResult = await this.model.generateContent(
+          `Today is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${todoInfo.date_query}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
+Return ONLY the date in YYYY-MM-DD format, nothing else.`
+        );
+        const dateResponse = await dateResult.response;
+        const dateText = dateResponse.text().trim();
+        const dateMatch = dateText.match(/\d{4}-\d{2}-\d{2}/);
+        dueDate = dateMatch ? dateMatch[0] : null;
+      }
+
+      // Create the todo
+      const todoData = {
+        user_id: user.id,
+        title: todoInfo.title,
+        completed: false,
+        created_at: new Date().toISOString(),
+        due_date: dueDate
+      };
+
+      // Insert todo into Supabase
+      const { data: todo, error: todoError } = await supabase
+        .from('todos')
+        .insert([todoData])
+        .select('*')
+        .single();
+
+      if (todoError) throw new Error('Error creating todo: ' + todoError.message);
+
+      // Create subtasks if any
+      if (todoInfo.subtasks && todoInfo.subtasks.length > 0) {
+        const subtaskData = todoInfo.subtasks.map(subtask => ({
+          todo_id: todo.id,
+          content: subtask.content,
+          completed: false,
+          created_at: new Date().toISOString()
+        }));
+
+        const { error: subtaskError } = await supabase
+          .from('subtasks')
+          .insert(subtaskData);
+
+        if (subtaskError) throw new Error('Error creating subtasks: ' + subtaskError.message);
+
+        // Fetch the complete todo with subtasks
+        const { data: todoWithSubtasks, error: fetchError } = await supabase
+          .from('todos')
+          .select('*, subtasks(*)')
+          .eq('id', todo.id)
+          .single();
+
+        if (fetchError) throw new Error('Error fetching todo with subtasks: ' + fetchError.message);
+
+        return {
+          type: 'todo',
+          data: todoWithSubtasks
+        };
+      }
+
+      return {
+        type: 'todo',
+        data: todo
+      };
+    } catch (error) {
+      console.error('Error creating todo list:', error);
+      return {
+        type: 'conversation',
+        data: {
+          response: `Sorry, I couldn't create the todo list. Error: ${error.message}`
+        }
+      };
+    }
+  }
+
   async createTask(input) {
     console.log('Processing input:', input);
 
@@ -262,6 +375,9 @@ Keep the response brief and friendly. If it's a question, provide a helpful answ
         
         case 'reminder':
           return await this.handleReminder(input);
+        
+        case 'todo_list':
+          return await this.handleTodoList(input);
         
         case 'conversation':
           return await this.handleConversation(input);

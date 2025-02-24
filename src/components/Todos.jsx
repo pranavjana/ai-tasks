@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, Trash2, ChevronRight, Calendar } from 'lucide-react';
+import { CheckCircle2, Circle, Trash2, ChevronRight, Calendar, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useState } from 'react';
 import { 
@@ -10,6 +10,8 @@ import {
   startOfDay,
   setDefaultOptions
 } from 'date-fns';
+import NotePage from './NotePage';
+import { AnimatePresence } from 'framer-motion';
 
 // Set default options for date-fns
 setDefaultOptions({ weekStartsOn: 1 }); // Monday as week start
@@ -40,30 +42,55 @@ const formatDueDate = (dateString) => {
   }
 };
 
-const SubtaskItem = ({ subtask, onToggle, parentId }) => (
-  <div className={cn(
-    "group flex items-start gap-3 pl-8 py-2",
-    "hover:bg-neutral-800/30"
-  )}>
-    <button 
-      onClick={() => onToggle(parentId, subtask.id)}
-      className="flex-shrink-0 mt-0.5"
-    >
-      {subtask.completed ? (
-        <CheckCircle2 className="w-4 h-4 text-green-400" />
-      ) : (
-        <Circle className="w-4 h-4 text-neutral-400 group-hover:text-white" />
-      )}
-    </button>
-    
-    <p className={cn(
-      "text-sm break-words flex-1",
-      subtask.completed ? "text-neutral-400 line-through" : "text-white"
-    )}>
-      {subtask.content}
-    </p>
-  </div>
-);
+const SubtaskItem = ({ subtask, onToggle, parentId }) => {
+  const [showNotes, setShowNotes] = useState(false);
+
+  return (
+    <>
+      <div className={cn(
+        "group flex items-start gap-3 pl-8 py-2",
+        "hover:bg-neutral-800/30"
+      )}>
+        <button 
+          onClick={() => onToggle(parentId, subtask.id)}
+          className="flex-shrink-0 mt-0.5"
+        >
+          {subtask.completed ? (
+            <CheckCircle2 className="w-4 h-4 text-green-400" />
+          ) : (
+            <Circle className="w-4 h-4 text-neutral-400 group-hover:text-white" />
+          )}
+        </button>
+        
+        <button 
+          onClick={() => setShowNotes(true)}
+          className={cn(
+            "text-sm break-words flex-1 text-left",
+            subtask.completed ? "text-neutral-400 line-through" : "text-white"
+          )}
+        >
+          {subtask.content}
+        </button>
+
+        <button
+          onClick={() => setShowNotes(true)}
+          className="flex-shrink-0 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity text-neutral-400 hover:text-white"
+        >
+          <FileText className="w-4 h-4" />
+        </button>
+      </div>
+
+      <AnimatePresence>
+        {showNotes && (
+          <NotePage 
+            subtask={subtask} 
+            onClose={() => setShowNotes(false)} 
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
+};
 
 const TodoItem = ({ todo, onDelete, onSubtaskToggle }) => {
   const [isExpanded, setIsExpanded] = useState(true);
