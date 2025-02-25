@@ -1,6 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
-
 // Initialize Supabase client
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -45,6 +44,27 @@ class GeminiService {
     return this.conversationHistory
       .map(msg => `${msg.role}: ${msg.message}`)
       .join('\n');
+  }
+
+  // Helper to clean JSON response from markdown formatting
+  cleanJsonResponse(text) {
+    // Remove markdown code block syntax
+    let cleaned = text.replace(/```json\n?|\n?```/g, '').trim();
+    
+    // Sometimes the model might include additional text before or after the JSON
+    // Find the first '{' and last '}'
+    const startIndex = cleaned.indexOf('{');
+    const endIndex = cleaned.lastIndexOf('}');
+    
+    if (startIndex !== -1 && endIndex !== -1) {
+      cleaned = cleaned.slice(startIndex, endIndex + 1);
+    }
+    
+    // Remove any remaining markdown or unwanted characters
+    cleaned = cleaned.replace(/^\s*[\r\n]/gm, '');
+    
+    console.log('Cleaned JSON text:', cleaned);
+    return cleaned;
   }
 
   async determineRequestType(input) {
@@ -299,80 +319,136 @@ Keep the response brief and friendly. If it's a question, provide a helpful answ
 
   async handleTodoList(input) {
     const context = this.getConversationContext();
-    const extractTodoPrompt = `Previous conversation:\n${context}\n\nExtract todo list information from this text: "${input}"
-You must respond with ONLY a JSON object in this exact format (no markdown, no backticks, no explanation):
-{
-  "title": "Main title for the todo list",
-  "date_query": "The date-related part of the request, if any",
-  "subtasks": [
-    {
-      "content": "Description of the subtask"
+    
+    // Determine the type of todo list based on keywords
+    const isLearningRequest = input.toLowerCase().includes('learn') || 
+                             input.toLowerCase().includes('study') || 
+                             input.toLowerCase().includes('teach me');
+    
+    const isShoppingList = input.toLowerCase().includes('buy') || 
+                          input.toLowerCase().includes('shop') || 
+                          input.toLowerCase().includes('purchase') ||
+                          input.toLowerCase().includes('ingredients');
+    
+    let extractTodoPrompt;
+    
+    if (isLearningRequest) {
+      extractTodoPrompt = `
+        You are an expert educational AI assistant. Create a comprehensive, step-by-step learning path for the following request: "${input}"
+        
+        Format the response as a structured todo list with the following:
+        1. A main todo item with a clear title describing the learning goal
+        2. A series of subtasks that break down the learning process into manageable steps
+        3. Each subtask should be specific, actionable, and in a logical sequence
+        4. Include estimated time commitments for each subtask
+        5. Add resource recommendations (books, courses, websites) as notes for relevant subtasks
+        
+        IMPORTANT: Return ONLY the JSON object, no markdown formatting or additional text.
+        {
+          "title": "Main learning goal",
+          "description": "Brief overview of the learning path",
+          "subtasks": [
+            {
+              "content": "Step 1 description",
+              "notes": "Optional resource recommendations or tips"
+            }
+          ]
+        }
+      `;
+    } else if (isShoppingList) {
+      extractTodoPrompt = `
+        Create a detailed shopping list based on this request: "${input}"
+        
+        If this is a recipe ingredients list:
+        1. Include all necessary ingredients with quantities
+        2. Group items by category (produce, dairy, pantry, etc.)
+        3. Add any special notes about brands or substitutions
+        
+        If this is a general shopping list:
+        1. Break down items into clear, specific entries
+        2. Group similar items together
+        3. Include any specific details mentioned (brands, sizes, etc.)
+        
+        IMPORTANT: Return ONLY the JSON object, no markdown formatting or additional text.
+        {
+          "title": "Shopping List: [Purpose]",
+          "description": "List for [specific purpose/recipe]",
+          "subtasks": [
+            {
+              "content": "Item with quantity/specifications",
+              "notes": "Optional details about brands, alternatives, or where to find"
+            }
+          ]
+        }
+      `;
+    } else {
+      extractTodoPrompt = `
+        Create a structured todo list based on this request: "${input}"
+        
+        Break down the request into:
+        1. A clear, concise main title
+        2. A brief description of the overall goal
+        3. A series of specific, actionable subtasks
+        4. Any relevant notes or details for each subtask
+        
+        Consider:
+        - Order tasks logically
+        - Include any mentioned deadlines or timing
+        - Add helpful details as notes
+        
+        IMPORTANT: Return ONLY the JSON object, no markdown formatting or additional text.
+        {
+          "title": "Main task or goal",
+          "description": "Brief overview of what needs to be done",
+          "subtasks": [
+            {
+              "content": "Specific task description",
+              "notes": "Optional timing, requirements, or helpful details"
+            }
+          ]
+        }
+      `;
     }
-  ]
-}`;
 
     try {
       // Get todo list info from Gemini
       console.log('Sending extract todo prompt:', extractTodoPrompt);
       const result = await this.chat.sendMessage(extractTodoPrompt);
       const response = await result.response;
-      const text = response.text().trim();
+      const rawText = response.text().trim();
+      console.log('Raw response:', rawText);
+
+      // Clean and parse the response
+      const cleanedText = this.cleanJsonResponse(rawText);
+      console.log('Cleaned response:', cleanedText);
       
-      const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
-      console.log('Cleaned JSON text:', cleanJson);
-      
-      const todoInfo = JSON.parse(cleanJson);
+      const todoInfo = JSON.parse(cleanedText);
       console.log('Parsed todo info:', todoInfo);
+      
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
 
-      // Add to conversation history
-      this.addToHistory('user', input);
-      this.addToHistory('assistant', `Created todo list: ${todoInfo.title}`);
-
-      // Get user
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError) throw new Error('Authentication error: ' + userError.message);
-      if (!user) throw new Error('No authenticated user found');
-
-      // Get the due date if specified
-      let dueDate = null;
-      if (todoInfo.date_query) {
-        const today = new Date();
-        const currentDay = today.getDate().toString().padStart(2, '0');
-        const currentMonth = (today.getMonth() + 1).toString().padStart(2, '0');
-        
-        const datePrompt = `Previous conversation:\n${context}\n\nToday is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${todoInfo.date_query}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
-Return ONLY the date in YYYY-MM-DD format, nothing else.`;
-
-        const dateResult = await this.chat.sendMessage(datePrompt);
-        const dateResponse = await dateResult.response;
-        const dateText = dateResponse.text().trim();
-        const dateMatch = dateText.match(/\d{4}-\d{2}-\d{2}/);
-        dueDate = dateMatch ? dateMatch[0] : null;
-      }
-
-      // Create the todo
-      const todoData = {
-        user_id: user.id,
-        title: todoInfo.title,
-        completed: false,
-        created_at: new Date().toISOString(),
-        due_date: dueDate
-      };
-
-      // Insert todo into Supabase
-      const { data: todo, error: todoError } = await supabase
+      // Create the todo with only the existing columns
+      const { data: todo, error } = await supabase
         .from('todos')
-        .insert([todoData])
-        .select('*')
+        .insert({
+          user_id: user.id,
+          title: todoInfo.title,
+          created_at: new Date().toISOString(),
+          completed: false
+        })
+        .select()
         .single();
 
-      if (todoError) throw new Error('Error creating todo: ' + todoError.message);
+      if (error) throw new Error('Error creating todo: ' + error.message);
 
       // Create subtasks if any
       if (todoInfo.subtasks && todoInfo.subtasks.length > 0) {
         const subtaskData = todoInfo.subtasks.map(subtask => ({
           todo_id: todo.id,
           content: subtask.content,
+          notes: subtask.notes || null,
           completed: false,
           created_at: new Date().toISOString()
         }));
@@ -394,13 +470,19 @@ Return ONLY the date in YYYY-MM-DD format, nothing else.`;
 
         return {
           type: 'todo',
-          data: todoWithSubtasks
+          data: todoWithSubtasks,
+          message: isLearningRequest 
+            ? "I've created a personalized learning path for you. Here's your step-by-step guide:"
+            : isShoppingList
+              ? "I've created your shopping list. Here are the items you need:"
+              : "I've created your todo list. Here are the tasks:"
         };
       }
 
       return {
         type: 'todo',
-        data: todo
+        data: todo,
+        message: "I've created your todo list."
       };
     } catch (error) {
       console.error('Error creating todo list:', error);

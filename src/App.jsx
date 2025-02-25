@@ -1,6 +1,8 @@
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import ChatInterface from './components/ChatInterface';
 import LoginPage from './components/LoginPage';
+import LandingPage from './components/LandingPage';
 import { supabase } from './lib/supabase';
 import { useEffect, useState } from "react";
 import TaskCard from './components/TaskCard';
@@ -35,8 +37,15 @@ function ProtectedApp() {
         )
         .subscribe();
 
+      // Listen for task updates from components
+      const handleTasksUpdated = (event) => {
+        setTasks(event.detail);
+      };
+      window.addEventListener('tasksUpdated', handleTasksUpdated);
+
       return () => {
         supabase.removeChannel(channel);
+        window.removeEventListener('tasksUpdated', handleTasksUpdated);
       };
     }
   }, [user]);
@@ -60,17 +69,25 @@ function ProtectedApp() {
   };
 
   if (!user) {
-    return <LoginPage />;
+    return <Navigate to="/login" />;
   }
 
   return <ChatInterface initialTasks={tasks} />;
 }
 
 function App() {
+  const { user } = useAuth();
+
   return (
-    <AuthProvider>
-      <ProtectedApp />
-    </AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={user ? <Navigate to="/app" /> : <LandingPage />} />
+          <Route path="/login" element={user ? <Navigate to="/app" /> : <LoginPage />} />
+          <Route path="/app" element={<ProtectedApp />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 

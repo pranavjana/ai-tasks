@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../lib/utils';
 import TypewriterEffect from './TypewriterEffect';
 import { supabase } from '../lib/supabase';
+import { useNavigate } from 'react-router-dom';
 
 const CodeBlock = ({ language, content }) => {
   const [copied, setCopied] = useState(false);
@@ -274,12 +275,11 @@ const ChatInterface = ({ initialTasks = [] }) => {
   const [messages, setMessages] = useState([]);
   const [newMessageId, setNewMessageId] = useState(null);
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    // Only set reminders once on mount
-    if (initialTasks.length > 0) {
-      setReminders(initialTasks);
-    }
+    // Update reminders whenever initialTasks changes
+    setReminders(initialTasks);
     
     // Fetch todos when component mounts
     const fetchTodos = async () => {
@@ -291,7 +291,7 @@ const ChatInterface = ({ initialTasks = [] }) => {
       }
     };
     fetchTodos();
-  }, []); // Remove initialTasks dependency
+  }, [initialTasks]); // Add initialTasks as a dependency
 
   const handleTaskDelete = (taskId) => {
     setReminders(prev => prev.filter(task => task.id !== taskId));
@@ -451,6 +451,19 @@ const ChatInterface = ({ initialTasks = [] }) => {
     }
   };
 
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      // Ensure we're actually signed out before navigating
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        navigate('/', { replace: true });
+      }
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
+
   const sidebarLinks = [
     { 
       href: "#", 
@@ -489,7 +502,7 @@ const ChatInterface = ({ initialTasks = [] }) => {
       href: "#",
       label: "Logout",
       icon: <LogOut className="w-full h-full" />,
-      onClick: signOut
+      onClick: handleSignOut
     }
   ];
 

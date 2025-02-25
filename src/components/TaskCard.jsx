@@ -1,6 +1,42 @@
-import { Calendar, Clock, CheckCircle2, Trash2 } from 'lucide-react';
+import { Calendar, Clock, CheckCircle2, Trash2, Zap } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { cn } from '../lib/utils';
+import { useState } from 'react';
+
+const PRIORITY_OPTIONS = [
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+];
+
+const getPriorityStyles = (priority) => {
+  switch (priority?.toLowerCase()) {
+    case 'high':
+      return {
+        badge: 'bg-red-500/10 text-red-500',
+        text: 'text-red-500',
+        border: 'border-red-500/20'
+      };
+    case 'medium':
+      return {
+        badge: 'bg-yellow-500/10 text-yellow-500',
+        text: 'text-yellow-500',
+        border: 'border-yellow-500/20'
+      };
+    case 'low':
+      return {
+        badge: 'bg-blue-500/10 text-blue-500',
+        text: 'text-blue-500',
+        border: 'border-blue-500/20'
+      };
+    default:
+      return {
+        badge: 'bg-neutral-500/10 text-neutral-500',
+        text: 'text-neutral-500',
+        border: 'border-neutral-500/20'
+      };
+  }
+};
 
 const getCategoryColor = (category) => {
   switch (category) {
@@ -99,7 +135,9 @@ const formatTime = (timeString) => {
   }
 };
 
-const TaskCard = ({ task, onDelete }) => {
+const TaskCard = ({ task, onDelete, onUpdate }) => {
+  const [isPriorityOpen, setIsPriorityOpen] = useState(false);
+  
   const handleDelete = async () => {
     try {
       const { error } = await supabase
@@ -109,27 +147,92 @@ const TaskCard = ({ task, onDelete }) => {
 
       if (error) throw error;
       
-      // Notify parent component to update UI
       onDelete?.(task.id);
     } catch (error) {
       console.error('Error deleting task:', error);
     }
   };
 
+  const handlePriorityChange = async (newPriority) => {
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .update({ priority: newPriority })
+        .eq('id', task.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      // Update the UI with the new task data
+      onUpdate?.(data);
+      setIsPriorityOpen(false);
+    } catch (error) {
+      console.error('Error updating priority:', error);
+    }
+  };
+
+  const priorityStyles = getPriorityStyles(task.priority);
+
   return (
     <div className={cn(
-      "relative bg-neutral-800/50 backdrop-blur-sm rounded-lg p-4 space-y-3 w-full overflow-hidden",
-      "before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1",
-      getCategoryColor(task.category).replace('bg-', 'before:bg-')
+      "group relative bg-neutral-800/50 backdrop-blur-sm rounded-lg p-4 space-y-3",
+      "border border-neutral-700/50 hover:border-neutral-600/50 transition-colors",
+      priorityStyles.border
     )}>
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-white font-medium text-sm break-words">{task.title}</h3>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-white font-medium text-sm break-words">{task.title}</h3>
+            <div className="flex items-center gap-1.5">
+              <div className="relative">
+                <button
+                  onClick={() => setIsPriorityOpen(!isPriorityOpen)}
+                  className={cn(
+                    "px-2 py-0.5 text-xs rounded-full whitespace-nowrap",
+                    priorityStyles.badge,
+                    "hover:ring-2 hover:ring-neutral-600 focus:outline-none focus:ring-2 focus:ring-neutral-600"
+                  )}
+                >
+                  {task.priority || 'medium'}
+                </button>
+                
+                {isPriorityOpen && (
+                  <div className="absolute top-full left-0 mt-1 w-24 py-1 bg-neutral-800 rounded-lg shadow-lg border border-neutral-700 z-50">
+                    {PRIORITY_OPTIONS.map((option) => {
+                      const optionStyles = getPriorityStyles(option.value);
+                      return (
+                        <button
+                          key={option.value}
+                          onClick={() => handlePriorityChange(option.value)}
+                          className={cn(
+                            "w-full px-3 py-1.5 text-xs text-left hover:bg-neutral-700/50",
+                            optionStyles.text
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              {task.category && (
+                <span className={cn(
+                  "px-2 py-0.5 text-xs rounded-full bg-neutral-700/50 text-neutral-300 whitespace-nowrap"
+                )}>
+                  {task.category}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           <button 
-            className="p-1 rounded-md transition-colors flex-shrink-0 text-red-400 hover:text-red-300 hover:bg-red-400/10"
+            className="p-1 rounded-md transition-colors flex-shrink-0 text-red-400 hover:text-red-300 hover:bg-red-400/10 opacity-0 group-hover:opacity-100"
             onClick={handleDelete}
           >
-            <Trash2 className="w-5 h-5" />
+            <Trash2 className="w-4 h-4" />
           </button>
           <button 
             className={`p-1 rounded-md transition-colors flex-shrink-0 ${
@@ -149,20 +252,27 @@ const TaskCard = ({ task, onDelete }) => {
         </p>
       )}
       
-      <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
+      <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-400">
         {task.schedule && formatDate(task.schedule) && (
           <div className="flex items-center gap-1 min-w-0">
-            <Calendar className="w-4 h-4 flex-shrink-0" />
+            <Calendar className="w-3.5 h-3.5" />
             <span className="truncate">{formatDate(task.schedule)}</span>
           </div>
         )}
         {task.time && formatTime(task.time) && (
           <div className="flex items-center gap-1 min-w-0">
-            <Clock className="w-4 h-4 flex-shrink-0" />
+            <Clock className="w-3.5 h-3.5" />
             <span className="truncate">{formatTime(task.time)}</span>
           </div>
         )}
       </div>
+
+      {task.ai_suggestion && (
+        <div className="mt-2 text-xs flex items-center gap-1.5 text-purple-400">
+          <Zap className="w-3.5 h-3.5" />
+          <span>{task.ai_suggestion}</span>
+        </div>
+      )}
     </div>
   );
 };

@@ -9,5 +9,13 @@ export default defineConfig({
     port: 5174,
     strictPort: true, // This ensures it only uses this port
     host: true // This enables network access
+  },
+  resolve: {
+    alias: {
+      '@mui/styled-engine': '@mui/styled-engine-sc'
+    },
+  },
+  optimizeDeps: {
+    include: ['@emotion/styled']
   }
 })

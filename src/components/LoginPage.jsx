@@ -1,28 +1,33 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import Button from './Button';
-
-// Add this to global scope for Google's code to find it
-const handleGoogleLogin = async () => {
-  try {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin
-      }
-    });
-    if (error) throw error;
-  } catch (error) {
-    console.error('Error signing in with Google:', error);
-  }
-};
+import { useNavigate } from 'react-router-dom';
 
 const LoginPage = () => {
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [mode, setMode] = useState('login'); // 'login' or 'signup'
+
+  const handleGoogleLogin = async () => {
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/app`
+        }
+      });
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error signing in with Google:', error);
+      setError({
+        type: 'error',
+        message: error.message
+      });
+    }
+  };
 
   useEffect(() => {
     // Load Google's script
@@ -32,10 +37,19 @@ const LoginPage = () => {
     script.defer = true;
     document.body.appendChild(script);
 
+    // Check if we're already authenticated
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        navigate('/app');
+      }
+    };
+    checkAuth();
+
     return () => {
       document.body.removeChild(script);
     };
-  }, []);
+  }, [navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -50,6 +64,7 @@ const LoginPage = () => {
         });
 
         if (error) throw error;
+        navigate('/app');
       } else {
         const { data, error } = await supabase.auth.signUp({
           email,
@@ -72,6 +87,10 @@ const LoginPage = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCancel = () => {
+    navigate('/');
   };
 
   return (
@@ -177,13 +196,23 @@ const LoginPage = () => {
             </div>
           </div>
 
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={loading}
-          >
-            {loading ? 'Loading...' : mode === 'login' ? 'Log in' : 'Sign up'}
-          </Button>
+          <div className="flex gap-4">
+            <Button
+              type="submit"
+              className="flex-1"
+              disabled={loading}
+            >
+              {loading ? 'Loading...' : mode === 'login' ? 'Log in' : 'Sign up'}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={handleCancel}
+              className="flex-1 border border-neutral-700"
+            >
+              Cancel
+            </Button>
+          </div>
         </form>
       </div>
     </div>
