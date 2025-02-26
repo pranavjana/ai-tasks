@@ -4,9 +4,9 @@ import Tasks from './Tasks';
 import TaskCard from './TaskCard';
 import TaskCreationTimeline from './TaskCreationTimeline';
 import { Sidebar, SidebarBody, SidebarLink, useSidebar } from './ui/Sidebar';
-import { MessageSquare, Bell, Calendar, ArrowRight, LayoutDashboard, User, Settings, LogOut, Check, ChevronRight, Copy, CheckCheck } from 'lucide-react';
+import { MessageSquare, Calendar, BarChart, ArrowRight, LayoutDashboard, User, Settings, LogOut, Check, ChevronRight, Copy, CheckCheck } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import geminiService from '../services/gemini';
+import { getService } from '../services/initServices';
 import Button from './Button';
 import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../lib/utils';
@@ -276,6 +276,10 @@ const ChatInterface = ({ initialTasks = [] }) => {
   const [newMessageId, setNewMessageId] = useState(null);
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  
+  // Get services from registry
+  const geminiService = getService('gemini');
+  const metricsService = getService('metrics');
 
   useEffect(() => {
     // Update reminders whenever initialTasks changes
@@ -291,7 +295,12 @@ const ChatInterface = ({ initialTasks = [] }) => {
       }
     };
     fetchTodos();
-  }, [initialTasks]); // Add initialTasks as a dependency
+    
+    // Log component mount
+    if (metricsService) {
+      metricsService.info('chat_interface', 'ChatInterface component mounted');
+    }
+  }, [initialTasks, geminiService, metricsService]); // Add dependencies
 
   const handleTaskDelete = (taskId) => {
     setReminders(prev => prev.filter(task => task.id !== taskId));
@@ -473,14 +482,14 @@ const ChatInterface = ({ initialTasks = [] }) => {
     },
     { 
       href: "#", 
-      label: "Reminders", 
-      icon: <Bell className="w-full h-full" />,
+      label: "Tasks", 
+      icon: <Calendar className="w-full h-full" />,
       onClick: () => setActiveSection('reminders')
     },
     { 
       href: "#", 
-      label: "Timeline", 
-      icon: <Calendar className="w-full h-full" />,
+      label: "Insights", 
+      icon: <BarChart className="w-full h-full" />,
       onClick: () => setActiveSection('timeline')
     },
   ];
