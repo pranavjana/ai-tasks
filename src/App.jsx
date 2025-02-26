@@ -6,6 +6,7 @@ import LandingPage from './components/LandingPage';
 import { supabase } from './lib/supabase';
 import { useEffect, useState } from "react";
 import TaskCard from './components/TaskCard';
+import { getService } from './services/initServices';
 
 function ProtectedApp() {
   const { user } = useAuth();
@@ -77,6 +78,15 @@ function ProtectedApp() {
 
 function App() {
   const { user } = useAuth();
+  
+  // Get the metrics service for logging
+  const metricsService = getService('metrics');
+  
+  useEffect(() => {
+    if (metricsService) {
+      metricsService.info('app', 'App component mounted');
+    }
+  }, [metricsService]);
 
   return (
     <BrowserRouter>
