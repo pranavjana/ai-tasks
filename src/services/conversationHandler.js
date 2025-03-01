@@ -4,25 +4,29 @@ import { supabase } from '../lib/supabase';
 import metricsService from './metrics';
 
 export async function handleDateQuery(input, contextObj) {
-  const { conversationHistory, chat } = contextObj;
-  const context = conversationHistory.map(msg => `${msg.role}: ${msg.message}`).join('\n');
+  const { conversationHistory = [], chat } = contextObj;
+  
   const today = new Date();
   const currentDay = today.getDate().toString().padStart(2, '0');
   const currentMonth = (today.getMonth() + 1).toString().padStart(2, '0');
+  const currentYear = today.getFullYear();
   
-  const prompt = `Previous conversation:\n${context}\n\nToday is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${input}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
-Return ONLY the date in YYYY-MM-DD format, nothing else.`;
+  const prompt = `Today is ${currentYear}-${currentMonth}-${currentDay}. Based on the query "${input}", what date (in YYYY-MM-DD format) is being referred to?`;
 
   try {
-    console.log('Current date:', `2025-${currentMonth}-${currentDay}`);
+    console.log('Current date:', `${currentYear}-${currentMonth}-${currentDay}`);
     console.log('Sending date prompt:', prompt);
+    
     const result = await chat.sendMessage(prompt);
     const response = await result.response;
     const text = response.text().trim();
     console.log('Raw LLM response:', text);
     
     const dateMatch = text.match(/\d{4}-\d{2}-\d{2}/);
-    const finalResponse = dateMatch ? dateMatch[0] : text;
+    if (!dateMatch) {
+      throw new Error('No valid date found in response');
+    }
+    const finalResponse = dateMatch[0];
     console.log('Final response:', finalResponse);
 
     // Update conversation history
@@ -46,17 +50,23 @@ export async function handleReminder(input, contextObj) {
   const { conversationHistory, chat } = contextObj;
   const context = conversationHistory.map(msg => `${msg.role}: ${msg.message}`).join('\n');
   
-  const extractRemindersPrompt = `Previous conversation:\n${context}\n\nExtract ALL reminders from this text: "${input}"
-You must respond with ONLY a JSON array of reminder objects in this exact format (no markdown, no backticks, no explanation):
-[
-  {
-    "title": "Brief title of the reminder",
-    "description": "Full description if any",
-    "category": "One of: Work, Personal, Health, Shopping, Home, Study, Social, Other",
-    "date_query": "The date-related part of the request",
-    "time": "The time if specified (in 24-hour format HH:mm), or null if no time specified"
-  }
-]`;
+  const extractRemindersPrompt = `Extract reminders from this text: "${input}"
+
+Return ONLY a JSON array containing exactly one reminder object in this format (no explanation, no backticks):
+[{
+  "title": "Brief title of the reminder (without the date/time part)",
+  "description": "Full description if any",
+  "category": "One of: Work, Personal, Health, Shopping, Home, Study, Social, Other",
+  "date_query": "IMPORTANT: Extract the EXACT date-related text from the input (e.g., 'tomorrow', 'next week', 'day after tmr', etc.)",
+  "time": "Extract time in 24-hour format (HH:mm) if specified, or null if no time mentioned"
+}]
+
+IMPORTANT: 
+1. Response MUST be a JSON array with square brackets []
+2. Array MUST contain exactly one reminder object with curly braces {}
+3. Title should NOT include the date/time information
+4. ALWAYS extract and preserve the EXACT date-related text in date_query
+5. Time should be in 24-hour format (HH:mm) or null`;
 
   try {
     console.log('Sending extract reminders prompt:', extractRemindersPrompt);
@@ -67,14 +77,41 @@ You must respond with ONLY a JSON array of reminder objects in this exact format
     const cleanJson = cleanJsonResponse(text);
     console.log('Cleaned JSON text:', cleanJson);
     
-    const remindersInfo = JSON.parse(cleanJson);
+    let remindersInfo;
+    try {
+      // First try to parse the JSON
+      const parsed = JSON.parse(cleanJson);
+      
+      // If it's an object, wrap it in an array
+      if (!Array.isArray(parsed)) {
+        remindersInfo = [parsed];
+      } else {
+        remindersInfo = parsed;
+      }
+      
+      // Validate the structure
+      if (!remindersInfo.length || !remindersInfo[0].title) {
+        throw new Error('Invalid reminder structure');
+      }
+    } catch (parseError) {
+      console.error('Failed to parse reminders JSON:', parseError);
+      // Create a basic reminder from the input
+      remindersInfo = [{
+        title: input.replace(/\b(today|tomorrow|tmr|next|after)\b.*$/, '').trim() || input,
+        description: '',
+        category: 'Other',
+        date_query: input.match(/\b(today|tomorrow|tmr|next|after\s+\w+)\b.*$/)?.[0] || 'today',
+        time: null
+      }];
+    }
+
     console.log('Parsed reminders info:', remindersInfo);
 
     conversationHistory.push({ role: 'user', message: input });
     conversationHistory.push({ role: 'assistant', message: `Extracted ${remindersInfo.length} reminder(s)` });
 
-    if (!Array.isArray(remindersInfo) || remindersInfo.length === 0) {
-      throw new Error('No reminders extracted from input');
+    if (remindersInfo.length === 0) {
+      throw new Error('No reminders could be extracted from input');
     }
 
     // Get the current user
@@ -82,29 +119,26 @@ You must respond with ONLY a JSON array of reminder objects in this exact format
     if (userError) throw new Error('Authentication error: ' + userError.message);
     if (!user) throw new Error('No authenticated user found');
 
-    // Get current date for processing reminders
-    const today = new Date();
-    const currentDay = today.getDate().toString().padStart(2, '0');
-    const currentMonth = (today.getMonth() + 1).toString().padStart(2, '0');
-
     const createdTasks = [];
     const errors = [];
 
     for (const reminderInfo of remindersInfo) {
       try {
-        if (!reminderInfo.title) throw new Error('No title extracted from reminder');
-        if (!reminderInfo.date_query) throw new Error('No date found in reminder');
+        // Validate required fields
+        if (!reminderInfo.title) {
+          reminderInfo.title = input;
+        }
+        if (!reminderInfo.date_query) {
+          reminderInfo.date_query = 'today';
+        }
 
-        const datePrompt = `Previous conversation:\n${context}\n\nToday is 2025-${currentMonth}-${currentDay}. Based on this reference date and the query "${reminderInfo.date_query}", give me the date in YYYY-MM-DD format. Always use 2025 as the year.
-Return ONLY the date in YYYY-MM-DD format, nothing else.`;
-
-        const dateResult = await chat.sendMessage(datePrompt);
-        const dateResponse = await dateResult.response;
-        const dateText = dateResponse.text().trim();
-        const dateMatch = dateText.match(/\d{4}-\d{2}-\d{2}/);
-        const scheduleDate = dateMatch ? dateMatch[0] : null;
-
-        if (!scheduleDate) throw new Error('Could not determine reminder date');
+        // Use handleDateQuery to get the correct date
+        const dateResult = await handleDateQuery(reminderInfo.date_query, { 
+          conversationHistory: [], // Empty conversation history for clean context
+          chat
+        });
+        const scheduleDate = dateResult.data.response;
+        console.log('Schedule date:', scheduleDate);
 
         // Validate and format time if provided
         let formattedTime = null;
@@ -154,7 +188,7 @@ Return ONLY the date in YYYY-MM-DD format, nothing else.`;
     return {
       type: 'multiple_tasks',
       data: createdTasks,
-      message: `Created ${createdTasks.length} reminders successfully!`
+      message: `Created ${createdTasks.length} reminder${createdTasks.length > 1 ? 's' : ''} successfully!`
     };
   } catch (error) {
     console.error('Error creating reminder(s):', error);

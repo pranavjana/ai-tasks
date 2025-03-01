@@ -1,0 +1,12 @@
+VITE_GEMINI_API_KEY=AIzaSyAOKVvbROIXRwFkJ8QRmwV19Rz3dmASEYM
+
+# Supabase Configuration
+# Get these values from your Supabase project settings
+VITE_SUPABASE_URL=https://ihiuqrjobgyjujyboqnv.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImloaXVxcmpvYmd5anVqeWJvcW52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk3OTA5MzQsImV4cCI6MjA1NTM2NjkzNH0.TQ22tyu6TW_Mi0sQSbkvx-UwwD87Fu-zhYQQfEZ2POs
+
+# Site URL for OAuth redirects
+VITE_SITE_URL=http://localhost:5174
+
+# Google OAuth Client ID
+VITE_GOOGLE_CLIENT_ID=128428682376-l8l9oekmes4s3feqnctqpvliedd4q6e3.apps.googleusercontent.com

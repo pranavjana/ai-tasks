@@ -400,15 +400,20 @@ const ChatInterface = ({ initialTasks = [] }) => {
           task: response.data
         }]);
       } else if (response.type === 'multiple_tasks') {
-        setReminders(prev => [...response.data, ...prev]);
-        const aiMessageId = messageId + '-ai';
-        setNewMessageId(aiMessageId);
-        setMessages(prev => [...prev, {
-          id: aiMessageId,
-          content: response.message || `I've set up ${response.data.length} reminders based on your request. Here's what I've scheduled:`,
-          type: 'ai',
-          tasks: response.data
-        }]);
+        // Ensure we have tasks data and it's an array
+        if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+          setReminders(prev => [...response.data, ...prev]);
+          const aiMessageId = messageId + '-ai';
+          setNewMessageId(aiMessageId);
+          setMessages(prev => [...prev, {
+            id: aiMessageId,
+            content: response.message || `I've set up ${response.data.length} reminder${response.data.length > 1 ? 's' : ''} based on your request. Here's what I've scheduled:`,
+            type: 'ai',
+            tasks: response.data // This will trigger the TaskCreationTimeline component
+          }]);
+        } else {
+          throw new Error('No valid tasks data received');
+        }
       } else if (response.type === 'todo') {
         setTodos(prev => [response.data, ...prev]);
         const aiMessageId = messageId + '-ai';
