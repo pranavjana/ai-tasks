@@ -29,6 +29,9 @@ export async function handleTodoList(input, contextObj) {
                            input.toLowerCase().includes('shop') || 
                            input.toLowerCase().includes('purchase') ||
                            input.toLowerCase().includes('ingredients');
+    const isGeneralList = input.toLowerCase().includes('list') || 
+                         input.toLowerCase().includes('todo') || 
+                         input.toLowerCase().includes('task');
     
     let extractTodoPrompt;
     if (isLearningRequest) {

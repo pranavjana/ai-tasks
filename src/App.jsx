@@ -1,3 +1,5 @@
+'use client';
+
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import ChatInterface from './components/ChatInterface';
@@ -5,7 +7,6 @@ import LoginPage from './components/LoginPage';
 import LandingPage from './components/LandingPage';
 import { supabase } from './lib/supabase';
 import { useEffect, useState } from "react";
-import TaskCard from './components/TaskCard';
 import { getService } from './services/initServices';
 
 function ProtectedApp() {
@@ -77,9 +78,29 @@ function ProtectedApp() {
 }
 
 function App() {
-  const { user } = useAuth();
+  const [initialized, setInitialized] = useState(false);
   
-  // Get the metrics service for logging
+  useEffect(() => {
+    // Initialize services
+    if (typeof window !== 'undefined' && !initialized) {
+      import('./services/initServices').then(module => {
+        module.initializeServices();
+        setInitialized(true);
+      });
+    }
+  }, [initialized]);
+
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
+
+function AppRoutes() {
+  const { user } = useAuth();
   const metricsService = getService('metrics');
   
   useEffect(() => {
@@ -89,15 +110,11 @@ function App() {
   }, [metricsService]);
 
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          <Route path="/" element={user ? <Navigate to="/app" /> : <LandingPage />} />
-          <Route path="/login" element={user ? <Navigate to="/app" /> : <LoginPage />} />
-          <Route path="/app" element={<ProtectedApp />} />
-        </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+    <Routes>
+      <Route path="/" element={user ? <Navigate to="/app" /> : <LandingPage />} />
+      <Route path="/login" element={user ? <Navigate to="/app" /> : <LoginPage />} />
+      <Route path="/app" element={<ProtectedApp />} />
+    </Routes>
   );
 }
 

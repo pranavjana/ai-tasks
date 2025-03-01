@@ -1,6 +1,7 @@
 // GeminiService.js
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { supabase } from '../lib/supabase';
+import { env } from '../lib/env';
 
 class GeminiService {
   constructor(metricsService, aiUtils, scheduleService, todoHandler, conversationHandler) {
@@ -10,7 +11,7 @@ class GeminiService {
     this.todoHandler = todoHandler;
     this.conversationHandler = conversationHandler;
     
-    this.genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+    this.genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
     this.model = this.genAI.getGenerativeModel({ 
       model: "gemini-2.0-flash",
       generationConfig: { temperature: 0.1, topK: 1, topP: 1, maxOutputTokens: 2048 },
@@ -43,15 +44,35 @@ class GeminiService {
   async determineRequestType(input) {
     const input_lower = input.toLowerCase();
     
-    // Example rule-based classifications:
-    if (input_lower.includes('date')) {
-      return { type: 'date_query', explanation: 'Contains date query', is_question: true };
+    // Check for todo list creation patterns
+    const todoPatterns = [
+      'create a list',
+      'make a list',
+      'todo list',
+      'to do list',
+      'to-do list',
+      'checklist',
+      'task list',
+      'shopping list',
+      'list of',
+      'create tasks',
+      'make tasks',
+      'add these tasks',
+      'add these items'
+    ];
+    
+    if (todoPatterns.some(pattern => input_lower.includes(pattern))) {
+      return { type: 'todo_list', explanation: 'Contains todo list creation keywords', is_question: false };
     }
-    if (input_lower.includes('remind')) {
+    
+    // Check for reminder patterns
+    if (input_lower.includes('remind') || input_lower.includes('schedule')) {
       return { type: 'reminder', explanation: 'Contains reminder keywords', is_question: false };
     }
-    if (input_lower.includes('todo')) {
-      return { type: 'todo_list', explanation: 'Contains todo keywords', is_question: false };
+    
+    // Check for date query patterns
+    if (input_lower.includes('date') || input_lower.includes('when')) {
+      return { type: 'date_query', explanation: 'Contains date query', is_question: true };
     }
     
     // Fallback to conversation
