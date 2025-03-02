@@ -1,9 +1,11 @@
+'use client';
+
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowRight, Check, Star, Shield, Zap, Users, Brain, Sparkles, Clock, MessageSquare } from 'lucide-react';
 import Button from './Button';
 import { cn } from '../lib/utils';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
 import { BentoGrid, BentoGridItem } from './ui/BentoGrid';
 import { FeatureSection } from './ui/FeatureSection';
 
@@ -33,10 +35,10 @@ const Testimonial = ({ quote, author, role, image }) => (
 );
 
 const LandingPage = () => {
-  const navigate = useNavigate();
+  const router = useRouter();
 
   const handleGetStarted = () => {
-    navigate('/login');
+    router.push('/login');
   };
 
   const features = [

@@ -18,19 +18,30 @@ const StyledChartContainer = styled.div`
     stroke: #404040;
   }
   .MuiChartsAxis-label {
-    fill: #9ca3af;
-    font-size: 10px;
+    fill: #e5e7eb !important;
+    font-size: 12px;
+    font-weight: 500;
   }
   .MuiAreaElement-root {
     fill: url(#areaGradient);
     opacity: 0.3;
   }
   .MuiChartsAxis-tickLabel {
-    fill: #9ca3af;
-    font-size: 10px;
+    fill: #e5e7eb !important;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  text {
+    fill: #e5e7eb !important;
   }
   .MuiChartsAxis-gridLine {
     stroke: #404040;
+  }
+  /* More specific selectors to ensure styles are applied */
+  & .MuiLineChart-root text, 
+  & .MuiLineChart-root .MuiChartsAxis-tickLabel,
+  & .MuiLineChart-root .MuiChartsAxis-label {
+    fill: #e5e7eb !important;
   }
 `;
 
@@ -85,12 +96,34 @@ const CompletionGraph = ({ completionData }) => {
               data: chartData.map(d => d.hour),
               valueFormatter: (value) => formatHour(value),
               scaleType: 'point',
+              tickLabelStyle: {
+                fill: '#e5e7eb',
+                fontSize: 11,
+                fontWeight: 500
+              },
+              labelStyle: {
+                fill: '#e5e7eb',
+                fontSize: 12,
+                fontWeight: 500
+              }
             }]}
             height={256}
             margin={{ top: 20, right: 20, bottom: 30, left: 40 }}
             slotProps={{
               legend: {
                 hidden: true
+              },
+              svg: {
+                style: {
+                  "& text": {
+                    fill: "#e5e7eb"
+                  }
+                }
+              }
+            }}
+            sx={{
+              '& .MuiChartsAxis-tickLabel, & .MuiChartsAxis-label, & text': {
+                fill: '#e5e7eb !important'
               }
             }}
           >

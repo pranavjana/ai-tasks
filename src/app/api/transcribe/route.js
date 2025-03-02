@@ -19,6 +19,11 @@ const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
 const MAX_REQUESTS_PER_WINDOW = 30;
 const requestCounts = new Map();
 
+/**
+ * Check if a user has exceeded their rate limit
+ * @param {string} userId - The user ID to check
+ * @returns {boolean} - Whether the user is within their rate limit
+ */
 const checkRateLimit = (userId) => {
   const now = Date.now();
   const userRequests = requestCounts.get(userId) || [];
@@ -35,6 +40,27 @@ const checkRateLimit = (userId) => {
   return true;
 };
 
+/**
+ * Validate the audio file
+ * @param {File} audioFile - The audio file to validate
+ * @returns {Object} - Validation result with status and error message if any
+ */
+const validateAudioFile = (audioFile) => {
+  if (!audioFile) {
+    return { valid: false, error: 'No audio file provided' };
+  }
+  
+  const allowedTypes = ['audio/webm', 'audio/mp4', 'audio/wav', 'audio/mpeg'];
+  if (!allowedTypes.includes(audioFile.type)) {
+    return { valid: false, error: 'Invalid audio format' };
+  }
+  
+  return { valid: true };
+};
+
+/**
+ * Handle POST requests to transcribe audio
+ */
 export async function POST(request) {
   try {
     // Get authorization header
@@ -60,14 +86,10 @@ export async function POST(request) {
     const formData = await request.formData();
     const audioFile = formData.get('audio');
 
-    if (!audioFile) {
-      return Response.json({ error: 'No audio file provided' }, { status: 400 });
-    }
-
-    // Validate file type
-    const allowedTypes = ['audio/webm', 'audio/mp4', 'audio/wav', 'audio/mpeg'];
-    if (!allowedTypes.includes(audioFile.type)) {
-      return Response.json({ error: 'Invalid audio format' }, { status: 400 });
+    // Validate audio file
+    const validation = validateAudioFile(audioFile);
+    if (!validation.valid) {
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     // Transcribe audio using OpenAI's Whisper API
@@ -76,9 +98,25 @@ export async function POST(request) {
       model: 'whisper-1',
     });
 
+    // Log successful transcription (in production, use a proper logging service)
+    console.log(`Transcription successful for user ${user.id.substring(0, 8)}...`);
+
     return Response.json({ text: transcription.text }, { status: 200 });
   } catch (error) {
     console.error('Transcription error:', error);
-    return Response.json({ error: 'Failed to transcribe audio: ' + error.message }, { status: 500 });
+    
+    // Provide more specific error messages based on error type
+    if (error.status === 429) {
+      return Response.json({ error: 'OpenAI rate limit exceeded' }, { status: 429 });
+    }
+    
+    if (error.code === 'invalid_api_key') {
+      return Response.json({ error: 'Invalid API configuration' }, { status: 500 });
+    }
+    
+    return Response.json({ 
+      error: 'Failed to transcribe audio', 
+      message: error.message 
+    }, { status: 500 });
   }
 } 

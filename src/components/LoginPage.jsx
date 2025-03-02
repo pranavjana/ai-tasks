@@ -1,55 +1,166 @@
+'use client';
+
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import Button from './Button';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 const LoginPage = () => {
-  const navigate = useNavigate();
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [mode, setMode] = useState('login'); // 'login' or 'signup'
+  const { signIn, signUp, user, setAuthCookie } = useAuth();
 
-  const handleGoogleLogin = async () => {
-    try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/app`
-        }
+  // Check for error parameters in the URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errorMsg = params.get('error');
+    
+    if (errorMsg) {
+      console.error('Error from OAuth callback:', errorMsg);
+      
+      // Show a more user-friendly error message for code verifier issues
+      if (errorMsg === 'auth_flow_interrupted_please_try_again') {
+        setError({
+          type: 'error',
+          message: 'Authentication flow was interrupted. Please try again.'
+        });
+      } else {
+        setError({
+          type: 'error',
+          message: decodeURIComponent(errorMsg)
+        });
+      }
+      
+      // Clear any stale PKCE state that might be causing issues
+      localStorage.removeItem('supabase-auth-code-verifier');
+    }
+  }, []);
+
+  // Only check authentication once on mount, not on every render
+  useEffect(() => {
+    // Skip client-side redirect if we're already being server-side redirected
+    // This prevents the double-redirect loop
+    const hasRedirectParam = new URLSearchParams(window.location.search).has('no_redirect');
+    
+    if (hasRedirectParam) {
+      console.log('Skipping client-side redirect check due to no_redirect parameter');
+      return;
+    }
+    
+    console.log('LoginPage mounted, checking auth state');
+    
+    // Check for OAuth redirect result
+    const checkOAuthRedirect = async () => {
+      const { data, error } = await supabase.auth.getSession();
+      console.log('Session check result:', { 
+        hasSession: !!data?.session,
+        error: error?.message || 'none'
       });
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error signing in with Google:', error);
+      
+      if (data?.session) {
+        console.log('OAuth redirect detected with valid session');
+        handleSuccessfulAuth(data.session);
+      }
+    };
+    
+    checkOAuthRedirect();
+  }, []);
+  
+  // Handle successful authentication (for both email and OAuth)
+  const handleSuccessfulAuth = (session) => {
+    if (!session) {
+      console.error('No session data provided to handleSuccessfulAuth');
+      return;
+    }
+    
+    try {
+      console.log('Setting up auth after successful login');
+      
+      // Store session in localStorage directly
+      localStorage.setItem('supabase-session', JSON.stringify(session));
+      
+      // Set cookies manually with document.cookie
+      const expiresIn = session.expires_in || 3600;
+      document.cookie = `supabase-auth-token=${session.access_token}; path=/; max-age=${expiresIn}; SameSite=Lax`;
+      document.cookie = `auth-status=authenticated; path=/; max-age=${expiresIn}; SameSite=Lax`;
+      
+      console.log('Session stored in localStorage and cookies set');
+      
+      // Force a full page reload to ensure the server sees the cookies
+      console.log('Redirecting to app with full page reload');
+      window.location.href = '/app?login_success=true&t=' + Date.now();
+    } catch (e) {
+      console.error('Error storing session:', e);
       setError({
         type: 'error',
-        message: error.message
+        message: 'Failed to store authentication data. Please try again.'
       });
     }
   };
 
-  useEffect(() => {
-    // Load Google's script
-    const script = document.createElement('script');
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    document.body.appendChild(script);
+  const handleGoogleLogin = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Clear any existing PKCE state before starting a new flow
+      localStorage.removeItem('supabase-auth-code-verifier');
+      console.log('Cleared existing code verifier from localStorage');
+      
+      // Clear all Supabase related cookies to start fresh
+      document.cookie = 'sb-access-token=; Max-Age=0; path=/; domain=' + window.location.hostname;
+      document.cookie = 'sb-refresh-token=; Max-Age=0; path=/; domain=' + window.location.hostname;
+      document.cookie = 'supabase-auth-token=; Max-Age=0; path=/; domain=' + window.location.hostname;
+      document.cookie = 'auth-status=; Max-Age=0; path=/; domain=' + window.location.hostname;
+      console.log('Cleared existing auth cookies');
 
-    // Check if we're already authenticated
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        navigate('/app');
+      // Get the current URL to use as the site URL
+      const siteUrl = window.location.origin;
+      const callbackUrl = `${siteUrl}/auth/callback`;
+      console.log('Using callback URL:', callbackUrl);
+      
+      // Configure OAuth options
+      const options = {
+        redirectTo: callbackUrl,
+        skipBrowserRedirect: false, // Important: Let Supabase handle the redirect
+      };
+      
+      console.log('Starting Google OAuth flow with PKCE...');
+      
+      // Start the sign in process
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options
+      });
+      
+      if (error) {
+        console.error('Error starting Google sign in:', error);
+        throw error;
       }
-    };
-    checkAuth();
-
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, [navigate]);
+      
+      if (!data?.url) {
+        console.error('No OAuth URL returned from Supabase');
+        throw new Error('No OAuth URL returned from Supabase');
+      }
+      
+      console.log('OAuth URL received, redirecting to:', data.url);
+      
+      // Let the browser handle the redirect
+      window.location.href = data.url;
+    } catch (error) {
+      console.error('Error signing in with Google:', error);
+      setError({
+        type: 'error',
+        message: error.message || 'Failed to connect to Google. Please try again.'
+      });
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -57,32 +168,53 @@ const LoginPage = () => {
     setError(null);
 
     try {
+      console.log('Attempting to sign in with:', { email });
+      
       if (mode === 'login') {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
+        // Use direct Supabase auth instead of the context method for more control
+        const { data, error } = await supabase.auth.signInWithPassword({ 
+          email, 
+          password 
         });
-
-        if (error) throw error;
-        navigate('/app');
-      } else {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-
-        if (error) throw error;
         
-        // Show email verification message for sign up
-        setError({
-          type: 'success',
-          message: 'Check your email for the verification link!'
-        });
+        if (error) {
+          console.error('Login error:', error.message);
+          setError({
+            type: 'error',
+            message: error.message
+          });
+        } else if (data && data.session) {
+          console.log('Login successful, session data received');
+          handleSuccessfulAuth(data.session);
+        } else {
+          console.error('Login successful but no session data returned');
+          setError({
+            type: 'error',
+            message: 'Authentication successful but session data is missing. Please try again.'
+          });
+        }
+      } else {
+        const { data, error } = await signUp({ email, password });
+        
+        if (error) {
+          console.error('Signup error:', error.message);
+          setError({
+            type: 'error',
+            message: error.message
+          });
+        } else {
+          console.log('Signup successful');
+          setError({
+            type: 'success',
+            message: 'Check your email for the verification link!'
+          });
+        }
       }
-    } catch (error) {
+    } catch (err) {
+      console.error('Unexpected auth error:', err);
       setError({
         type: 'error',
-        message: error.message
+        message: 'An unexpected error occurred. Please try again.'
       });
     } finally {
       setLoading(false);
@@ -90,7 +222,7 @@ const LoginPage = () => {
   };
 
   const handleCancel = () => {
-    navigate('/');
+    router.push('/');
   };
 
   return (
@@ -118,6 +250,7 @@ const LoginPage = () => {
           <Button
             onClick={handleGoogleLogin}
             className="w-full bg-white hover:bg-gray-50 text-black flex items-center justify-center gap-2"
+            disabled={loading}
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path
@@ -202,13 +335,14 @@ const LoginPage = () => {
               className="flex-1"
               disabled={loading}
             >
-              {loading ? 'Loading...' : mode === 'login' ? 'Log in' : 'Sign up'}
+              {loading ? 'Processing...' : mode === 'login' ? 'Log in' : 'Sign up'}
             </Button>
             <Button
               type="button"
               variant="ghost"
               onClick={handleCancel}
               className="flex-1 border border-neutral-700"
+              disabled={loading}
             >
               Cancel
             </Button>

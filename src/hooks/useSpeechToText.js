@@ -1,14 +1,27 @@
-import { useState, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
+'use client';
 
+import { useState, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
+
+/**
+ * Custom hook for speech-to-text functionality
+ * @returns {Object} - Speech-to-text methods and state
+ */
 export const useSpeechToText = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState(null);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [audioChunks, setAudioChunks] = useState([]);
 
+  /**
+   * Start recording audio
+   */
   const startRecording = useCallback(async () => {
     try {
+      // Reset error state
+      setError(null);
+      
+      // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -16,62 +29,68 @@ export const useSpeechToText = () => {
         }
       });
 
+      // Configure recorder
       const options = {
         audioBitsPerSecond: 128000,
         mimeType: 'audio/webm'
       };
 
+      // Create and configure recorder
       const recorder = new MediaRecorder(stream, options);
       setMediaRecorder(recorder);
       setAudioChunks([]);
 
+      // Handle data available events
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           setAudioChunks((chunks) => [...chunks, event.data]);
         }
       };
 
+      // Start recording
       recorder.start(1000); // Record in 1-second chunks
       setIsRecording(true);
-      setError(null);
     } catch (err) {
-      setError('Error accessing microphone: ' + err.message);
-      console.error('Error accessing microphone:', err);
+      const errorMessage = `Error accessing microphone: ${err.message}`;
+      setError(errorMessage);
+      console.error(errorMessage, err);
     }
   }, []);
 
+  /**
+   * Stop recording and transcribe audio
+   * @returns {Promise<string>} - Transcribed text
+   */
   const stopRecording = useCallback(async () => {
-    if (!mediaRecorder) return;
+    if (!mediaRecorder) return '';
 
     return new Promise((resolve) => {
       mediaRecorder.onstop = async () => {
         try {
+          // Create audio blob from chunks
           const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
           
-          // Check if the audio is too short (less than 0.5 seconds)
+          // Check if the audio is too short
           if (audioBlob.size < 1000) {
             throw new Error('Recording too short');
           }
           
+          // Create form data for API request
           const formData = new FormData();
-          
-          // Create a File object with .webm extension
           const audioFile = new File([audioBlob], 'recording.webm', { 
             type: 'audio/webm',
             lastModified: Date.now()
           });
-          
           formData.append('audio', audioFile);
 
-          // Get the session for authentication
+          // Get authentication session
           const { data: { session }, error: sessionError } = await supabase.auth.getSession();
           if (sessionError || !session) {
             throw new Error('Authentication required');
           }
 
-          // Log the request details for debugging
-          console.log('Sending transcription request with token:', session.access_token.substring(0, 10) + '...');
-          
+          // Send transcription request
+          console.log('Sending transcription request...');
           const response = await fetch('/api/transcribe', {
             method: 'POST',
             body: formData,
@@ -79,23 +98,17 @@ export const useSpeechToText = () => {
               'Authorization': `Bearer ${session.access_token}`
             }
           });
-
-          // Log the response status for debugging
           console.log('Transcription response status:', response.status);
           
-          let responseData;
+          // Parse response
           const responseText = await response.text();
-          
-          // Log the raw response for debugging
-          console.log('Transcription raw response:', responseText.substring(0, 100) + (responseText.length > 100 ? '...' : ''));
+          let responseData;
           
           try {
-            // Try to parse the response as JSON
             responseData = responseText ? JSON.parse(responseText) : {};
           } catch (parseError) {
             console.error('Failed to parse response:', parseError.message);
             
-            // Check if the response contains HTML (likely an error page)
             if (responseText.includes('<!DOCTYPE html>')) {
               throw new Error('Server returned HTML instead of JSON. Check server logs.');
             } else {
@@ -103,24 +116,29 @@ export const useSpeechToText = () => {
             }
           }
 
+          // Handle error responses
           if (!response.ok) {
             throw new Error(responseData.error || `Server error: ${response.status}`);
           }
 
+          // Return transcribed text
           resolve(responseData.text || '');
         } catch (err) {
-          const errorMessage = 'Error transcribing audio: ' + err.message;
+          const errorMessage = `Error transcribing audio: ${err.message}`;
           setError(errorMessage);
           console.error(errorMessage, err);
           resolve('');
         } finally {
-          // Clean up
-          mediaRecorder.stream.getTracks().forEach(track => track.stop());
+          // Clean up resources
+          if (mediaRecorder && mediaRecorder.stream) {
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+          }
           setIsRecording(false);
           setAudioChunks([]);
         }
       };
 
+      // Stop recording
       mediaRecorder.stop();
     });
   }, [mediaRecorder, audioChunks]);

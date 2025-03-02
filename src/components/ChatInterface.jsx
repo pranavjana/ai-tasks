@@ -1,8 +1,5 @@
 import SearchBar from './SearchBar';
-import Timeline from './Timeline';
-import Tasks from './Tasks';
-import TaskCard from './TaskCard';
-import TaskCreationTimeline from './TaskCreationTimeline';
+import dynamic from 'next/dynamic';
 import { Sidebar, SidebarBody, SidebarLink, useSidebar } from './ui/Sidebar';
 import { MessageSquare, Calendar, BarChart, ArrowRight, LayoutDashboard, User, Settings, LogOut, Check, ChevronRight, Copy, CheckCheck } from 'lucide-react';
 import { useState, useEffect } from 'react';
@@ -12,7 +9,20 @@ import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../lib/utils';
 import TypewriterEffect from './TypewriterEffect';
 import { supabase } from '../lib/supabase';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
+import TaskCreationTimeline from './TaskCreationTimeline';
+import Tasks from './Tasks';
+
+// Dynamically import heavy components
+const Timeline = dynamic(() => import('./Timeline'), {
+  loading: () => <div className="animate-pulse bg-muted h-64 rounded-lg"></div>,
+  ssr: false
+});
+
+const Todos = dynamic(() => import('./Todos'), {
+  loading: () => <div className="animate-pulse bg-muted h-64 rounded-lg"></div>,
+  ssr: false
+});
 
 const CodeBlock = ({ language, content }) => {
   const [copied, setCopied] = useState(false);
@@ -275,7 +285,7 @@ const ChatInterface = ({ initialTasks = [] }) => {
   const [messages, setMessages] = useState([]);
   const [newMessageId, setNewMessageId] = useState(null);
   const { user, signOut } = useAuth();
-  const navigate = useNavigate();
+  const router = useRouter();
   
   // Get services from registry
   const geminiService = getService('gemini');
@@ -449,7 +459,7 @@ const ChatInterface = ({ initialTasks = [] }) => {
 
   // Listen for viewReminders event
   useEffect(() => {
-    const handleViewReminders = () => setActiveSection('reminders');
+    const handleViewReminders = () => setActiveSection('tasks');
     window.addEventListener('viewReminders', handleViewReminders);
     return () => window.removeEventListener('viewReminders', handleViewReminders);
   }, []);
@@ -471,7 +481,7 @@ const ChatInterface = ({ initialTasks = [] }) => {
       // Ensure we're actually signed out before navigating
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        navigate('/', { replace: true });
+        router.push('/');
       }
     } catch (error) {
       console.error('Error signing out:', error);
@@ -489,7 +499,7 @@ const ChatInterface = ({ initialTasks = [] }) => {
       href: "#", 
       label: "Tasks", 
       icon: <Calendar className="w-full h-full" />,
-      onClick: () => setActiveSection('reminders')
+      onClick: () => setActiveSection('tasks')
     },
     { 
       href: "#", 
@@ -604,7 +614,7 @@ const ChatInterface = ({ initialTasks = [] }) => {
             </div>
           )}
           
-          {activeSection === 'reminders' && (
+          {activeSection === 'tasks' && (
             <div className="h-full overflow-auto">
               <Tasks 
                 tasks={reminders}
